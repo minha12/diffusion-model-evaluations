@@ -1,0 +1,34 @@
+# config/metrics.yaml
+
+# Image parameters
+image_size: [256, 256]
+batch_size: 16 # FOR TESTING ONLY, CHANGE TO, E.G. 16 LATER
+
+# Metrics to compute
+metrics:
+  # Frechet Inception Distance
+  fid:
+    feature: 64  # Feature dimension
+
+  # Learned Perceptual Image Patch Similarity
+  lpips:
+    net_type: "alex"  # Options: "alex", "vgg", "squeeze"
+
+  # Peak Signal-to-Noise Ratio
+  psnr: {}
+
+  # Structural Similarity Index Measure
+  ssim: {}
+
+  # Multi-Scale Structural Similarity Index Measure
+  ms_ssim: {}
+
+  # Kernel Inception Distance
+  kid:
+    subset_size: 50 # FOR TESTING ONLY, CHANGE TO, E.G. 50 LATER
+
+  # Inception Score
+  is: {}
+
+  # Universal Image Quality Index
+  uiqi: {}
