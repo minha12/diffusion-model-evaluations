@@ -5,7 +5,7 @@ import yaml
 from pathlib import Path
 
 # Load configuration
-configfile: "config/evaluation.yaml"
+configfile: "config/test.yaml"
 
 # Define dataset
 DATASET = config["dataset"]
@@ -66,6 +66,7 @@ rule run_inference:
         steps=config["inference"]["num_inference_steps"],
         resolution=config["inference"]["resolution"],
         base_model_path=lambda wildcards: config["models"][wildcards.model]["base_path"],
+        model_type=lambda wildcards: config["models"][wildcards.model]["model_type"],
         controlnet_path=lambda wildcards: config["models"][wildcards.model]["controlnet_path"],
         seed=config["inference"]["seed"]
     shell:
@@ -80,7 +81,8 @@ rule run_inference:
             --steps {params.steps} \
             --resolution {params.resolution} \
             --base_model_path {params.base_model_path} \
-            --controlnet_path {params.controlnet_path}
+            --controlnet_path {params.controlnet_path} \
+            --model_type {params.model_type}
         """
 
 # Add this rule to your Snakefile
