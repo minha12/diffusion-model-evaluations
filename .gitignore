@@ -2,3 +2,8 @@
 # Image files
 data/**/*.png
 data/**/*.jpg
+
+results/**/*.png
+results/**/*.jpg
+.snakemake_timestamp
+prompts.txt
