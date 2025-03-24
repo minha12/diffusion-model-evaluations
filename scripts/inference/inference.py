@@ -1,4 +1,9 @@
-from diffusers import StableDiffusion3ControlNetPipeline, SD3ControlNetModel
+from diffusers import (
+    StableDiffusion3ControlNetPipeline, 
+    SD3ControlNetModel,
+    StableDiffusionControlNetPipeline, 
+    ControlNetModel
+)
 from diffusers.utils import load_image
 import torch
 from accelerate import Accelerator
@@ -16,10 +21,11 @@ def inference(
     steps=20,
     resolution=1024,
     base_model_path="/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers",
-    controlnet_path="/home/ubuntu/models/trained-model/sd3-controlnet"
+    controlnet_path="/home/ubuntu/models/trained-model/sd3-controlnet",
+    model_type="sd3"
 ):
     """
-    Process a batch of images using StableDiffusion3 ControlNet.
+    Process a batch of images using StableDiffusion ControlNet.
     
     Args:
         condition_dir: Directory containing condition images
@@ -29,8 +35,10 @@ def inference(
         seed: Random seed for generation
         steps: Number of inference steps
         resolution: Image resolution
-        base_model_path: Path to the base SD3 model
+        base_model_path: Path to the base model
         controlnet_path: Path to the ControlNet model
+        model_type: 'sd2' or 'sd3'
+        checkpoint_path: Optional path to specific checkpoint file
     """
     # Initialize accelerator with mixed precision
     accelerator = Accelerator(mixed_precision="fp16")
@@ -63,24 +71,43 @@ def inference(
     
     if accelerator.is_main_process:
         print(f"Found {len(image_paths)} images and {len(prompts)} prompts")
+        print(f"Loading {model_type} model...")
     
-    # Load models
-    if accelerator.is_main_process:
-        print("Loading models...")
-    
-    # Load controlnet and base model with mixed precision
-    controlnet = SD3ControlNetModel.from_pretrained(
-        controlnet_path, 
-        torch_dtype=torch.float16,
-        local_files_only=True,
-        trust_remote_code=True
-    ).to(device)
-    
-    pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-        base_model_path, 
-        controlnet=controlnet,
-        torch_dtype=torch.float16
-    ).to(device)
+    # Load appropriate model based on model_type
+    if model_type.lower() == "sd3":
+        # SD3 ControlNet pipeline
+        controlnet = SD3ControlNetModel.from_pretrained(
+            controlnet_path, 
+            torch_dtype=torch.float16,
+            local_files_only=True,
+            trust_remote_code=True
+        ).to(device)
+        
+        pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
+            base_model_path, 
+            controlnet=controlnet,
+            torch_dtype=torch.float16
+        ).to(device)
+        
+    elif model_type.lower() == "sd2":
+        # SD2.1 ControlNet pipeline
+        
+        controlnet = ControlNetModel.from_pretrained(
+            controlnet_path,
+            local_files_only=True,
+            torch_dtype=torch.float16
+        ).to(device)
+        
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(
+            base_model_path,
+            controlnet=controlnet,
+            torch_dtype=torch.float16
+        ).to(device)
+        
+        # Enable memory optimization for SD2.1
+        pipe.enable_xformers_memory_efficient_attention()
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}. Must be 'sd2' or 'sd3'.")
     
     # Prepare pipeline with accelerator
     pipe = accelerator.prepare(pipe)
@@ -136,12 +163,23 @@ def inference(
         
         # Generate images
         with torch.no_grad():
-            outputs = pipe(
-                prompt=batch_prompts,
-                num_inference_steps=steps,
-                generator=generator,
-                control_image=batch_images
-            ).images
+            if model_type.lower() == "sd3":
+                outputs = pipe(
+                    prompt=batch_prompts,
+                    num_inference_steps=steps,
+                    generator=generator,
+                    control_image=batch_images
+                ).images
+            elif model_type.lower() == "sd2":  # SD2.1 pipeline has slightly different parameter names
+                outputs = pipe(
+                    prompt=batch_prompts,
+                    num_inference_steps=steps,
+                    generator=generator,
+                    image=batch_images,
+                    guidance_scale=7.5  # Add guidance scale for SD2.1
+                ).images
+            else:
+                raise ValueError(f"Unknown model_type: {model_type}. Must be 'sd2' or 'sd3'.")
         
         # Save output images
         for j, output_image in enumerate(outputs):
