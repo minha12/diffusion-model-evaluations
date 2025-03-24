@@ -1,0 +1,121 @@
+# workflow/snakemake/Snakefile
+
+import os
+import yaml
+from pathlib import Path
+
+# Load configuration
+configfile: "config/evaluation.yaml"
+
+# Define dataset
+DATASET = config["dataset"]
+
+# Define directories with dataset paths
+MODELS_DIR = "models"
+RESULTS_DIR = f"results/{DATASET}"
+GROUND_TRUTH_DIR = f"data/{DATASET}/patches"
+GENERATED_IMAGES_DIR = f"{RESULTS_DIR}/generated_images"
+METRICS_DIR = f"{RESULTS_DIR}/metrics"
+
+# Get model names
+MODELS = config["models"]
+
+# Define rule to run all evaluations, including dataset preparation
+rule all:
+    input:
+        f"data/{DATASET}",  # Add dataset preparation as a dependency
+        expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
+
+# Rule to prepare the dataset
+rule prepare_dataset:
+    output:
+        directory(f"data/{DATASET}")
+    params:
+        source_dir=config["data_sources"]["drsk"]["path"],
+        num_samples=config["dataset_preparation"]["num_samples"],
+        seed=config["dataset_preparation"]["seed"]
+    shell:
+        """
+        python scripts/preparation/sd35_controlnet.py \
+            --source_dir={params.source_dir} \
+            --target_dir={output} \
+            --num_samples={params.num_samples} \
+            --seed={params.seed}
+        """
+
+# New rule to run inference for all models (without wildcards)
+rule run_all_inference:
+    input:
+        dataset=f"data/{DATASET}",  # Add dataset preparation as a dependency
+        models=expand(f"{GENERATED_IMAGES_DIR}/{{model}}", model=MODELS)
+    output:
+        touch(f"{RESULTS_DIR}/.inference_complete")
+
+# Rule to run inference for each model
+rule run_inference:
+    input:
+        accelerate_config=config["accelerate_config"],
+        control_images=f"data/{DATASET}/segmentation",  # Dataset-specific control images
+        model=lambda wildcards: f"{MODELS_DIR}/{wildcards.model}",
+        prompts=f"data/{DATASET}/prompts/prompts.txt",
+        dataset=f"data/{DATASET}"  # Add dataset preparation as a dependency
+    output:
+        directory(f"{GENERATED_IMAGES_DIR}/{{model}}")
+    params:
+        batch_size=config["inference"]["batch_size"],
+        steps=config["inference"]["num_inference_steps"],
+        resolution=config["inference"]["resolution"],
+        base_model_path=lambda wildcards: config["models"][wildcards.model]["base_path"],
+        controlnet_path=lambda wildcards: config["models"][wildcards.model]["controlnet_path"],
+        seed=config["inference"]["seed"]
+    shell:
+        """
+        mkdir -p {output}
+        accelerate launch --config_file {input.accelerate_config} scripts/inference/inference.py \
+            --condition_dir {input.control_images} \
+            --prompts_file {input.prompts} \
+            --output_dir {output} \
+            --batch_size {params.batch_size} \
+            --seed {params.seed} \
+            --steps {params.steps} \
+            --resolution {params.resolution} \
+            --base_model_path {params.base_model_path} \
+            --controlnet_path {params.controlnet_path}
+        """
+
+# Add this rule to your Snakefile
+rule evaluate_all_models:
+    input:
+        expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
+        
+# Rule to evaluate each model
+rule evaluate_model:
+    input:
+        generated=f"{GENERATED_IMAGES_DIR}/{{model}}",
+        ground_truth=GROUND_TRUTH_DIR,
+        config="config/metrics.yaml"
+    output:
+        directory=directory(f"{METRICS_DIR}/{{model}}"),
+        results=f"{METRICS_DIR}/{{model}}/metrics_results.yaml"
+    shell:
+        """
+        mkdir -p {output.directory}
+        python scripts/evaluation/metric_evaluations.py \
+            --config {input.config} \
+            --generated {input.generated} \
+            --ground-truth {input.ground_truth} \
+            --output {output.directory}
+        """
+
+# Rule to generate comparison report
+rule generate_report:
+    input:
+        metrics=expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
+    output:
+        report=f"{RESULTS_DIR}/evaluation_report.html"
+    shell:
+        """
+        python scripts/evaluation/generate_report.py \
+            --metrics-dirs {input.metrics} \
+            --output {output.report}
+        """
