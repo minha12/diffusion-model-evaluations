@@ -1,0 +1,4 @@
+.snakemake/
+# Image files
+data/**/*.png
+data/**/*.jpg
