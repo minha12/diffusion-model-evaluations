@@ -1,0 +1,27 @@
+models:
+  sd35_controlnet:
+    base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
+    controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5"
+  # Add other models as needed
+
+inference:
+  batch_size: 4
+  num_inference_steps: 20
+  resolution: 512
+  seed: 42
+
+# Dataset information
+dataset: "drsk_10k_seed_42"
+
+# Data source information
+data_sources:
+  drsk:
+    path: "~/datasets/drsk"
+
+# Dataset preparation parameters
+dataset_preparation:
+  num_samples: 10000
+  seed: 42
+
+# Accelerate config
+accelerate_config: "config/accelerate_config.yaml"
