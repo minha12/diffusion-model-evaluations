@@ -48,6 +48,17 @@ diffusion_models_evaluation/
    pip install -r requirements.txt
    ```
 
+Troubeshoot: 
+- If there is issue with Snakemake installation:
+```bash
+conda install -c bioconda snakemake
+```
+
+- Login to huggingface if there is issue with downloading model:
+```bash
+huggingface-cli login
+```
+
 3. Set up your directory structure (if not already created):
    ```bash
    bash create_structure.sh
