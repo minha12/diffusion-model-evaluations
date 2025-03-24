@@ -2,7 +2,11 @@ models:
   sd35_controlnet:
     base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
     controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5"
-  # Add other models as needed
+    model_type: "sd3"  # Add model type parameter
+  sd21_controlnet:
+    base_path: "stabilityai/stable-diffusion-2-1-base"  # Can be HF ID or local path
+    controlnet_path: "/home/ubuntu/models/sd21_controlnet/controlnet/epoch=48-step=38856.ckpt"
+    model_type: "sd2"  # Specify SD2.1 model type
 
 inference:
   batch_size: 4
