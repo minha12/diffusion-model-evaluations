@@ -7,3 +7,5 @@ results/**/*.png
 results/**/*.jpg
 .snakemake_timestamp
 prompts.txt
+*.ckpt
+
