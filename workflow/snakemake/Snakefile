@@ -56,7 +56,7 @@ rule run_inference:
     input:
         accelerate_config=config["accelerate_config"],
         control_images=f"data/{DATASET}/segmentation",  # Dataset-specific control images
-        model=lambda wildcards: f"{MODELS_DIR}/{wildcards.model}",
+        # model=lambda wildcards: f"{MODELS_DIR}/{wildcards.model}",
         prompts=f"data/{DATASET}/prompts/prompts.txt",
         dataset=f"data/{DATASET}"  # Add dataset preparation as a dependency
     output:
