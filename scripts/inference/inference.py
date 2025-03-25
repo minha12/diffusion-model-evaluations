@@ -105,7 +105,7 @@ def inference(
         ).to(device)
         
         # Enable memory optimization for SD2.1
-        pipe.enable_xformers_memory_efficient_attention()
+        #pipe.enable_xformers_memory_efficient_attention()
     else:
         raise ValueError(f"Unknown model_type: {model_type}. Must be 'sd2' or 'sd3'.")
     
