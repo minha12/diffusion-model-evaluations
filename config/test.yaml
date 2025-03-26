@@ -2,11 +2,18 @@ models:
   sd35_controlnet:
     base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
     controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5"
-    model_type: "sd3"  # Add model type parameter
+    model_type: "sd3"  # Specific model architecture
+    model_class: "sd"  # Indicates which inference pipeline to use
   sd21_controlnet:
     base_path: "stabilityai/stable-diffusion-2-1-base"  # Can be HF ID or local path
     controlnet_path: "/home/ubuntu/models/trained-diffusion/sd21_controlnet/controlnet"
-    model_type: "sd2"  # Specify SD2.1 model type
+    model_type: "sd2"  # Specific model architecture
+    model_class: "sd"  # Indicates which inference pipeline to use
+  ldm_model_512:
+    model_type: "ldm"  # Specific model architecture
+    model_class: "ldm"  # Indicates which inference pipeline to use
+    config_path: "/home/ubuntu/models/trained-diffusion/ldm/config-512-with-vq-f4.yaml"
+    ckpt_path: "/home/ubuntu/models/trained-diffusion/ldm/epoch=000099.ckpt"
 
 inference:
   batch_size: 2
@@ -19,13 +26,19 @@ dataset: "test"
 
 # # Data source information
 data_sources:
-  drsk:
+  test:
     path: "~/datasets/drsk"
 
 # Dataset preparation parameters
 dataset_preparation:
-  num_samples: 10000
+  num_samples: 2
   seed: 42
 
 # Accelerate config
 accelerate_config: "config/accelerate_config.yaml"
+
+conda_envs:
+  default: "envs/default.yaml"
+  ldm: "envs/ldm.yaml"
+  
+default_conda_env: "envs/default.yaml"
