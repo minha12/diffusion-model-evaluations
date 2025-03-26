@@ -26,7 +26,8 @@ LDM_MODELS = [model for model in MODELS if config["models"][model].get("model_cl
 rule all:
     input:
         f"data/{DATASET}",  # Dataset preparation dependency
-        expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
+        expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS),
+        f"{RESULTS_DIR}/visualizations"
 
 # Rule to prepare the dataset
 rule prepare_dataset:
@@ -60,7 +61,7 @@ rule prepare_ldm:
     output:
         directory("models/latent-diffusion-semantic")
     shell:
-        "bash scripts/setup/prepare_ldm.sh {output}"
+        "bash scripts/preparation/prepare_ldm.sh {output}"
 
 # SD inference rule (restricted to SD models)
 rule run_sd_inference:
@@ -86,7 +87,7 @@ rule run_sd_inference:
     shell:
         """
         mkdir -p {output}
-        accelerate launch scripts/inference/sd_inference.py \
+        accelerate launch --main_process_port 29503 scripts/inference/sd_inference.py \
             --condition_dir {input.control_images} \
             --prompts_file {input.prompts} \
             --output_dir {output} \
@@ -161,12 +162,13 @@ rule generate_report:
     input:
         metrics=expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
     output:
-        report=f"{RESULTS_DIR}/evaluation_report.html"
+        directory(f"{RESULTS_DIR}/visualizations")
     conda:
         config["conda_envs"]["default"]
     shell:
         """
+        mkdir -p {output}
         python scripts/evaluation/generate_report.py \
-            --metrics-dirs {input.metrics} \
-            --output {output.report}
-        """
+            --metrics-dir {METRICS_DIR} \
+            --output-dir {output}
+        """        
