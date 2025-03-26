@@ -15,10 +15,6 @@ def create_directory_structure(target_dir):
     """Create the directory structure for the test dataset"""
     dirs = [
         "patches",
-        "processed/pathology/annotations",
-        "processed/pathology/masks",
-        "processed/pathology/metadata",
-        "processed/pathology/patches",
         "prompts",
         "segmentation",
         "plain-segmentation"  # Added new directory
