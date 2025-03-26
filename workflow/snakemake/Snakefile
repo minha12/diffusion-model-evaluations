@@ -60,17 +60,7 @@ rule prepare_ldm:
     output:
         directory("models/latent-diffusion-semantic")
     shell:
-        """
-        if [ ! -d models ]; then
-            mkdir -p models
-        fi
-        
-        if [ ! -d {output} ]; then
-            git clone git@github.com:minha12/latent-diffusion-semantic.git {output}
-        else
-            cd {output} && git pull
-        fi
-        """
+        "bash scripts/setup/prepare_ldm.sh {output}"
 
 # SD inference rule (restricted to SD models)
 rule run_sd_inference:
