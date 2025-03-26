@@ -59,6 +59,11 @@ conda install -c bioconda snakemake
 huggingface-cli login
 ```
 
+- If port 29500 is being occupied:
+```bash
+sudo systemctl restart NetworkManager
+```
+
 3. Set up your directory structure (if not already created):
    ```bash
    bash create_structure.sh
@@ -86,21 +91,40 @@ The project uses Snakemake to manage the evaluation workflow. The main workflow 
 To run the complete workflow:
 
 ```bash
-cd workflow/snakemake
-snakemake --cores all
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all
 ```
 
 To run specific steps:
 
 ```bash
 # Prepare dataset only
-snakemake --cores all prepare_dataset
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all prepare_dataset
 
 # Run inference only
-snakemake --cores all run_all_inference
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all run_all_inference
 
 # Run evaluation only
-snakemake --cores all evaluate_all_models
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all evaluate_all_models
+```
+
+### Running Inference for a Specific Model
+
+To run inference for only a specific model:
+
+```bash
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all "results/{DATASET}/generated_images/{MODEL_NAME}"
+```
+
+For example, to run only SD3.5 ControlNet on the test dataset:
+
+```bash
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all results/test/generated_images/sd35_controlnet
+```
+
+For incomplete runs, add the `--rerun-incomplete` flag:
+
+```bash
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all results/test/generated_images/sd35_controlnet --rerun-incomplete
 ```
 
 ## Metrics
