@@ -17,13 +17,15 @@ GROUND_TRUTH_DIR = f"data/{DATASET}/patches"
 GENERATED_IMAGES_DIR = f"{RESULTS_DIR}/generated_images"
 METRICS_DIR = f"{RESULTS_DIR}/metrics"
 
-# Get model names
-MODELS = config["models"]
+# Get model names and categorize based on model_class
+MODELS = list(config["models"].keys())
+SD_MODELS = [model for model in MODELS if config["models"][model].get("model_class", "sd") == "sd"]
+LDM_MODELS = [model for model in MODELS if config["models"][model].get("model_class", "sd") == "ldm"]
 
 # Define rule to run all evaluations, including dataset preparation
 rule all:
     input:
-        f"data/{DATASET}",  # Add dataset preparation as a dependency
+        f"data/{DATASET}",  # Dataset preparation dependency
         expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
 
 # Rule to prepare the dataset
@@ -31,48 +33,70 @@ rule prepare_dataset:
     output:
         directory(f"data/{DATASET}")
     params:
-        source_dir=config["data_sources"]["drsk"]["path"],
+        source_dir=config["data_sources"][DATASET]["path"],
         num_samples=config["dataset_preparation"]["num_samples"],
         seed=config["dataset_preparation"]["seed"]
+    conda:
+        config["conda_envs"]["default"]
     shell:
         """
-        python scripts/preparation/sd35_controlnet.py \
+        python scripts/preparation/prepare_dataset.py \
             --source_dir={params.source_dir} \
             --target_dir={output} \
             --num_samples={params.num_samples} \
             --seed={params.seed}
         """
 
-# New rule to run inference for all models (without wildcards)
+# Rule to run inference for all models
 rule run_all_inference:
     input:
-        dataset=f"data/{DATASET}",  # Add dataset preparation as a dependency
+        dataset=f"data/{DATASET}",  # Dataset preparation dependency
         models=expand(f"{GENERATED_IMAGES_DIR}/{{model}}", model=MODELS)
     output:
         touch(f"{RESULTS_DIR}/.inference_complete")
 
-# Rule to run inference for each model
-rule run_inference:
+# Rule to clone and prepare the LDM repository (required for LDM models)
+rule prepare_ldm:
+    output:
+        directory("models/latent-diffusion-semantic")
+    shell:
+        """
+        if [ ! -d models ]; then
+            mkdir -p models
+        fi
+        
+        if [ ! -d {output} ]; then
+            git clone git@github.com:minha12/latent-diffusion-semantic.git {output}
+        else
+            cd {output} && git pull
+        fi
+        """
+
+# SD inference rule (restricted to SD models)
+rule run_sd_inference:
     input:
         accelerate_config=config["accelerate_config"],
-        control_images=f"data/{DATASET}/segmentation",  # Dataset-specific control images
-        # model=lambda wildcards: f"{MODELS_DIR}/{wildcards.model}",
+        control_images=f"data/{DATASET}/segmentation",
         prompts=f"data/{DATASET}/prompts/prompts.txt",
-        dataset=f"data/{DATASET}"  # Add dataset preparation as a dependency
+        dataset=f"data/{DATASET}"
     output:
         directory(f"{GENERATED_IMAGES_DIR}/{{model}}")
+    wildcard_constraints:
+        model="|".join(SD_MODELS)  # Restrict to SD models
     params:
         batch_size=config["inference"]["batch_size"],
         steps=config["inference"]["num_inference_steps"],
         resolution=config["inference"]["resolution"],
         base_model_path=lambda wildcards: config["models"][wildcards.model]["base_path"],
-        model_type=lambda wildcards: config["models"][wildcards.model]["model_type"],
-        controlnet_path=lambda wildcards: config["models"][wildcards.model]["controlnet_path"],
+        model_type=lambda wildcards: config["models"][wildcards.model].get("model_type", "sd"),
+        controlnet_path=lambda wildcards: config["models"][wildcards.model].get("controlnet_path", ""),
         seed=config["inference"]["seed"]
+    conda:
+        config["conda_envs"]["default"]
     shell:
         """
         mkdir -p {output}
-        accelerate launch --config_file {input.accelerate_config} scripts/inference/inference.py \
+        accelerate launch scripts/inference/sd_inference.py \
             --condition_dir {input.control_images} \
             --prompts_file {input.prompts} \
             --output_dir {output} \
@@ -85,11 +109,42 @@ rule run_inference:
             --model_type {params.model_type}
         """
 
-# Add this rule to your Snakefile
+# LDM inference rule (restricted to LDM models)
+rule run_ldm_inference:
+    input:
+        control_images=f"data/{DATASET}/plain-segmentation",
+        dataset=f"data/{DATASET}",
+        ldm_repo="models/latent-diffusion-semantic"  # Dependency on LDM repo
+    output:
+        directory(f"{GENERATED_IMAGES_DIR}/{{model}}")
+    wildcard_constraints:
+        model="|".join(LDM_MODELS)  # Restrict to LDM models
+    params:
+        batch_size=config["inference"]["batch_size"],
+        config_path=lambda wildcards: config["models"][wildcards.model]["config_path"],
+        ckpt_path=lambda wildcards: config["models"][wildcards.model]["ckpt_path"],
+        seed=config["inference"]["seed"],
+        steps=config["inference"].get("ldm_steps", 200)
+    conda:
+        config["conda_envs"]["ldm"]
+    shell:
+        """
+        mkdir -p {output}
+        python scripts/inference/ldm_inference.py \
+            --control_images {input.control_images} \
+            --output_dir {output} \
+            --batch_size {params.batch_size} \
+            --seed {params.seed} \
+            --steps {params.steps} \
+            --config_path {params.config_path} \
+            --ckpt_path {params.ckpt_path}
+        """
+
+# Rule to evaluate all models
 rule evaluate_all_models:
     input:
         expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
-        
+
 # Rule to evaluate each model
 rule evaluate_model:
     input:
@@ -99,6 +154,8 @@ rule evaluate_model:
     output:
         directory=directory(f"{METRICS_DIR}/{{model}}"),
         results=f"{METRICS_DIR}/{{model}}/metrics_results.yaml"
+    conda:
+        config["conda_envs"]["default"]
     shell:
         """
         mkdir -p {output.directory}
@@ -115,6 +172,8 @@ rule generate_report:
         metrics=expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
     output:
         report=f"{RESULTS_DIR}/evaluation_report.html"
+    conda:
+        config["conda_envs"]["default"]
     shell:
         """
         python scripts/evaluation/generate_report.py \
