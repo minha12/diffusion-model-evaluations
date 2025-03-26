@@ -8,4 +8,4 @@ results/**/*.jpg
 .snakemake_timestamp
 prompts.txt
 *.ckpt
-
+results/
