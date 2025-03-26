@@ -1,0 +1,28 @@
+name: diffusers
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch=2.5.1
+  - torchvision=0.20.1
+  - torchaudio=2.5.1
+  - pytorch-cuda=12.1
+  - diffusers
+  - pip
+  - pip:
+    - nvitop
+    - torchmetrics
+    - matplotlib
+    - fire
+    - torch-fidelity
+    - accelerate>=0.16.0
+    - transformers>=4.25.1
+    - ftfy
+    - tensorboard
+    - Jinja2
+    - datasets
+    - wandb
+    - sentencepiece
