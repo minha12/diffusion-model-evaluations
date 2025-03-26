@@ -185,7 +185,7 @@ def inference(
         for j, output_image in enumerate(outputs):
             image_path = batch_paths[j]
             image_name = os.path.splitext(os.path.basename(image_path))[0]
-            output_path = os.path.join(output_dir, f"{image_name}_output.png")
+            output_path = os.path.join(output_dir, f"{image_name}.png")
             output_image.save(output_path)
             
             if accelerator.is_main_process:
