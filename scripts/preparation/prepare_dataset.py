@@ -110,8 +110,14 @@ def copy_dataset(
     # Create prompts.txt file
     prompts_file = os.path.join(target_dir, "prompts", "prompts.txt")
     
+    # Create image_names_eval.txt file to store copied image filenames
+    image_names_file = os.path.join(target_dir, "image_names_eval.txt")
+    
     # Add progress bar
     pbar = tqdm(selected_ids, desc="Copying dataset files", unit="sample")
+    
+    # List to store successfully copied image filenames
+    copied_image_filenames = []
     
     with open(prompts_file, 'w') as f:
         for i, image_id in enumerate(pbar):
@@ -124,10 +130,13 @@ def copy_dataset(
                 src_image = os.path.join(images_dir, f"{image_id}.png")
             
             # Use original filename instead of sequential numbering
-            target_image = os.path.join(target_dir, "patches", f"{image_id}{os.path.splitext(src_image)[1]}")
+            image_filename = f"{image_id}{os.path.splitext(src_image)[1]}"
+            target_image = os.path.join(target_dir, "patches", image_filename)
             
             if os.path.exists(src_image):
                 shutil.copy2(src_image, target_image)
+                # Add the filename to our list
+                copied_image_filenames.append(image_filename)
                 if verbose:
                     print(f"Copied image: {src_image} -> {target_image}")
             else:
@@ -136,8 +145,6 @@ def copy_dataset(
             
             # Copy segmentation mask
             src_seg = os.path.join(segmentation_dir, f"{image_id}.png")
-            
-            # Use original filename for segmentation as well
             target_seg = os.path.join(target_dir, "segmentation", f"{image_id}.png")
             
             if os.path.exists(src_seg):
@@ -173,8 +180,14 @@ def copy_dataset(
                 if verbose:
                     print(f"No prompt found for image {image_id}, using generic prompt")
     
+    # Write the image filenames to image_names_eval.txt
+    with open(image_names_file, 'w') as f:
+        for filename in copied_image_filenames:
+            f.write(f"{filename}\n")
+    
     print(f"\nDataset successfully copied to {target_dir}")
     print(f"Created {len(selected_ids)} samples with corresponding images, segmentations, and prompts")
+    print(f"Created image_names_eval.txt with {len(copied_image_filenames)} image filenames")
 
 if __name__ == "__main__":
     fire.Fire(copy_dataset)
