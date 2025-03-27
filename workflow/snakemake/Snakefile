@@ -5,7 +5,7 @@ import yaml
 from pathlib import Path
 
 # Load configuration
-configfile: "config/evaluation.yaml"
+configfile: "config/test.yaml"
 
 # Define dataset
 DATASET = config["dataset"]
@@ -80,7 +80,7 @@ rule run_sd_inference:
         model="|".join(SD_MODELS)  # Restrict to SD models
     params:
         batch_size=config["inference"]["batch_size"],
-        steps=config["inference"]["num_inference_steps"],
+        steps=lambda wildcards: config["models"][wildcards.model].get("num_inference_steps", config["inference"]["num_inference_steps"]),
         resolution=config["inference"]["resolution"],
         base_model_path=lambda wildcards: config["models"][wildcards.model]["base_path"],
         model_type=lambda wildcards: config["models"][wildcards.model].get("model_type", "sd"),
@@ -121,7 +121,7 @@ rule run_ldm_inference:
         config_path=lambda wildcards: config["models"][wildcards.model]["config_path"],
         ckpt_path=lambda wildcards: config["models"][wildcards.model]["ckpt_path"],
         seed=config["inference"]["seed"],
-        steps=config["inference"].get("ldm_steps", 200)
+        steps=lambda wildcards: config["models"][wildcards.model].get("num_inference_steps", config["inference"].get("ldm_steps", 200))
     conda:
         config["conda_envs"]["ldm"]
     resources:
@@ -181,4 +181,4 @@ rule generate_report:
         python scripts/evaluation/generate_report.py \
             --metrics-dir {METRICS_DIR} \
             --output-dir {output}
-        """        
+        """
