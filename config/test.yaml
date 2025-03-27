@@ -16,22 +16,23 @@ models:
     ckpt_path: "/home/ubuntu/models/trained-diffusion/ldm/epoch=000099.ckpt"
 
 inference:
-  batch_size: 2
-  num_inference_steps: 20
+  batch_size: 4
+  num_inference_steps: 28
   resolution: 512
   seed: 42
 
 # Dataset information
-dataset: "test"
+dataset_name: &dataset_name "test-2025-03-27-100_seed_123"  # Using an anchor
+dataset: *dataset_name  # Using the alias to reference the anchor
 
-# # Data source information
+# Data source information
 data_sources:
-  test:
+  *dataset_name:
     path: "~/datasets/drsk"
 
 # Dataset preparation parameters
 dataset_preparation:
-  num_samples: 2
+  num_samples: 100
   seed: 42
 
 # Accelerate config
@@ -40,5 +41,3 @@ accelerate_config: "config/accelerate_config.yaml"
 conda_envs:
   default: "envs/default.yaml"
   ldm: "envs/ldm.yaml"
-  
-default_conda_env: "envs/default.yaml"
