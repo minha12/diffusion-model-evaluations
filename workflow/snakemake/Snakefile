@@ -32,7 +32,11 @@ rule all:
 # Rule to prepare the dataset
 rule prepare_dataset:
     output:
-        directory(f"data/{DATASET}")
+        main_dir=directory(f"data/{DATASET}"),
+        seg_dir=directory(f"data/{DATASET}/segmentation"),
+        patches_dir=directory(f"data/{DATASET}/patches"),
+        plain_seg_dir=directory(f"data/{DATASET}/plain-segmentation"),
+        prompts=f"data/{DATASET}/prompts/prompts.txt"
     params:
         source_dir=config["data_sources"][DATASET]["path"],
         num_samples=config["dataset_preparation"]["num_samples"],
@@ -43,7 +47,7 @@ rule prepare_dataset:
         """
         python scripts/preparation/prepare_dataset.py \
             --source_dir={params.source_dir} \
-            --target_dir={output} \
+            --target_dir={output.main_dir} \
             --num_samples={params.num_samples} \
             --seed={params.seed}
         """
@@ -84,10 +88,12 @@ rule run_sd_inference:
         seed=config["inference"]["seed"]
     conda:
         config["conda_envs"]["default"]
+    resources:
+        gpus=4
     shell:
         """
         mkdir -p {output}
-        accelerate launch --main_process_port 29503 scripts/inference/sd_inference.py \
+        accelerate launch --config_file {input.accelerate_config} scripts/inference/sd_inference.py \
             --condition_dir {input.control_images} \
             --prompts_file {input.prompts} \
             --output_dir {output} \
@@ -118,6 +124,8 @@ rule run_ldm_inference:
         steps=config["inference"].get("ldm_steps", 200)
     conda:
         config["conda_envs"]["ldm"]
+    resources:
+        gpus=1
     shell:
         """
         mkdir -p {output}
@@ -147,6 +155,8 @@ rule evaluate_model:
         results=f"{METRICS_DIR}/{{model}}/metrics_results.yaml"
     conda:
         config["conda_envs"]["default"]
+    resources:
+        gpus=1
     shell:
         """
         mkdir -p {output.directory}
