@@ -2,7 +2,7 @@
 
 # Image parameters
 image_size: [256, 256]
-batch_size: 16 # FOR TESTING ONLY, CHANGE TO, E.G. 16 LATER
+batch_size: 4 # FOR TESTING ONLY, CHANGE TO, E.G. 16 LATER
 
 # Metrics to compute
 metrics:
