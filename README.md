@@ -127,6 +127,64 @@ For incomplete runs, add the `--rerun-incomplete` flag:
 snakemake -s workflow/snakemake/Snakefile --use-conda --cores all results/test/generated_images/sd35_controlnet --rerun-incomplete
 ```
 
+## Workflow Graph
+
+The following graph visualizes the Snakemake workflow structure and dependencies between tasks:
+
+```mermaid
+graph TD
+    %% Define Nodes (Rules and Key Data)
+    subgraph Preparation
+        direction TB
+        PrepData[("prepare_dataset <br> (Generates dataset, patches, prompts, etc.)")]
+        PrepLDM[("prepare_ldm <br> (Clones LDM repo)")]
+    end
+
+    subgraph Inference
+        direction TB
+        RunSD["run_sd_inference <br> (Generates images for SD models)"]
+        RunLDM["run_ldm_inference <br> (Generates images for LDM models)"]
+    end
+
+    subgraph Evaluation
+        direction TB
+        EvalModel["evaluate_model <br> (Generates metrics per model)"]
+        GenReport[("generate_report <br> (Creates visualizations/report)")]
+    end
+
+    FinalTarget[("rule all <br> (Final target)")]
+
+    %% Define Edges (Dependencies)
+
+    %% Preparation Dependencies
+    %% (External config/scripts are implicit)
+
+    %% Inference Dependencies
+    PrepData -- "Dataset (segmentation, prompts)" --> RunSD
+    PrepData -- "Dataset (plain-segmentation)" --> RunLDM
+    PrepLDM -- "LDM Repo" --> RunLDM
+
+    %% Evaluation Dependencies
+    PrepData -- "Ground Truth Patches" --> EvalModel
+    RunSD -- "Generated SD Images" --> EvalModel
+    RunLDM -- "Generated LDM Images" --> EvalModel
+    EvalModel -- "Metrics Results (all models)" --> GenReport
+
+    %% Rule All Dependencies
+    PrepData -- "Dataset Prepared" --> FinalTarget
+    EvalModel -- "Metrics Results (all models)" --> FinalTarget
+    GenReport -- "Visualizations" --> FinalTarget
+
+    %% Style (Optional)
+    classDef rule fill:#f9f,stroke:#333,stroke-width:2px;
+    class PrepData,PrepLDM,RunSD,RunLDM,EvalModel,GenReport,FinalTarget rule;
+```
+
+The workflow consists of three main stages:
+1. **Preparation**: Sets up the dataset, generates prompts, and prepares any required repositories
+2. **Inference**: Runs image generation using different models (SD and LDM variants)
+3. **Evaluation**: Calculates metrics and generates reports comparing model performance
+
 ## Metrics
 
 The framework supports multiple evaluation metrics:
