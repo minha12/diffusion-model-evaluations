@@ -20,9 +20,12 @@ def inference(
     seed=0,
     steps=20,
     resolution=1024,
-    base_model_path="/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers",
-    controlnet_path="/home/ubuntu/models/trained-model/sd3-controlnet",
-    model_type="sd3"
+    base_model_path="/path/to/base/model",
+    controlnet_path="/path/to/controlnet/model",
+    model_type="sd3",
+    controlnet_conditioning_scale=1.0,
+    guidance_scale=7,
+    negative_prompt="blurry, out of focus, poor quality, pixelated, noisy, distorted, overexposed, underexposed, low resolution"
 ):
     """
     Process a batch of images using StableDiffusion ControlNet.
@@ -38,8 +41,19 @@ def inference(
         base_model_path: Path to the base model
         controlnet_path: Path to the ControlNet model
         model_type: 'sd2' or 'sd3'
-        checkpoint_path: Optional path to specific checkpoint file
+        controlnet_conditioning_scale: Strength of controlnet conditioning (default: 1.0)
+        guidance_scale: Guidance scale for classifier-free guidance (default: 0.7)
+        negative_prompt: Negative prompt to guide generation away from certain concepts 
+                         (default includes quality issues specific to pathology images)
     """
+    # Set model-specific default steps if not provided
+    if steps is None:
+        if model_type.lower() == "sd3":
+            steps = 28
+        elif model_type.lower() == "sd2":
+            steps = 50
+        else:
+            steps = 20  # Fallback default
     # Initialize accelerator with mixed precision
     accelerator = Accelerator(mixed_precision="fp16")
     device = accelerator.device
@@ -163,20 +177,30 @@ def inference(
         
         # Generate images
         with torch.no_grad():
+            batch_negative_prompts = [negative_prompt] * len(batch_prompts)
             if model_type.lower() == "sd3":
                 outputs = pipe(
                     prompt=batch_prompts,
+                    negative_prompt=batch_negative_prompts,
                     num_inference_steps=steps,
                     generator=generator,
-                    control_image=batch_images
+                    control_image=batch_images,
+                    width=resolution,
+                    height=resolution,
+                    controlnet_conditioning_scale=controlnet_conditioning_scale,
+                    guidance_scale=guidance_scale
                 ).images
             elif model_type.lower() == "sd2":  # SD2.1 pipeline has slightly different parameter names
                 outputs = pipe(
                     prompt=batch_prompts,
+                    negative_prompt=batch_negative_prompts,
                     num_inference_steps=steps,
                     generator=generator,
                     image=batch_images,
-                    guidance_scale=7.5  # Add guidance scale for SD2.1
+                    width=resolution,
+                    height=resolution,
+                    controlnet_conditioning_scale=controlnet_conditioning_scale,
+                    guidance_scale=guidance_scale
                 ).images
             else:
                 raise ValueError(f"Unknown model_type: {model_type}. Must be 'sd2' or 'sd3'.")
