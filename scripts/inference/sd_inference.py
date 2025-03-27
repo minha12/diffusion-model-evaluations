@@ -25,7 +25,7 @@ def inference(
     model_type="sd3",
     controlnet_conditioning_scale=1.0,
     guidance_scale=7,
-    negative_prompt="blurry, out of focus, poor quality, pixelated, noisy, distorted, overexposed, underexposed, low resolution"
+    negative_prompt="blurry, out of focus, poor quality, pixelated, noisy"
 ):
     """
     Process a batch of images using StableDiffusion ControlNet.
