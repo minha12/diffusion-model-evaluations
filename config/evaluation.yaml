@@ -41,7 +41,36 @@ dataset_preparation:
 # Accelerate config
 accelerate_config: "config/accelerate_config.yaml"
 
-# Adding conda environment configurations from test.yaml
+# --- Downstream Task Evaluation Settings ---
+downstream_tasks:
+  enabled: true # Set to false to skip downstream tasks
+  classification:
+    enabled: true
+    model: "resnet18" # Model architecture from torchvision.models
+    num_epochs: 10
+    batch_size: 16
+    learning_rate: 0.001
+    # How to derive labels from masks:
+    # 'binary_carcinoma': Label 1 if carcinoma > threshold, else 0
+    # 'multiclass_dominant': Label is the most frequent class (excluding Unknown/Background)
+    labeling_strategy: "binary_carcinoma"
+    carcinoma_threshold: 0.1 # Minimum fraction of carcinoma pixels for binary label 1
+    num_classes: 2 # Adjust based on labeling_strategy (2 for binary, 3+ for multiclass)
+    class_names: ["Other", "Carcinoma"] # Corresponds to binary_carcinoma strategy
+    # You might need to adjust num_classes and class_names if using multiclass
+    # class_names_multiclass: ["Inflammatory/Reactive", "Carcinoma", "Normal"] # Example for multiclass
+  segmentation:
+    enabled: true
+    model: "unet" # Can be 'unet' (basic implementation) or specific from segmentation-models-pytorch
+    encoder: "resnet34" # Encoder for U-Net (if using segmentation-models-pytorch)
+    num_epochs: 20
+    batch_size: 8
+    learning_rate: 0.001
+    num_classes: 5 # Corresponds to your mask labels 0-4
+    class_names: ["Unknown", "Background/Artifact", "Inflammatory/Reactive", "Carcinoma", "Normal"]
+
+# --- Conda Environments ---
 conda_envs:
-  default: "envs/default.yaml"
+  default: "envs/default.yaml" # Assumes env with torch, torchvision, torchmetrics, pyyaml, etc.
   ldm: "envs/ldm.yaml"
+  downstream: "envs/downstream.yaml" # New environment for downstream tasks
