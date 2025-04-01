@@ -4,12 +4,12 @@ channels:
   - nvidia # If using GPU
   - conda-forge
 dependencies:
-  - python=3.9 # Or your preferred version
+  - python=3.10 # Or your preferred version
   - pip
   - pytorch::pytorch>=1.10 # Check compatibility
   - pytorch::torchvision
   - pytorch::torchaudio
-  - pytorch::cuda-toolkit # Specify version if needed, e.g., 11.3
+  - nvidia::cuda-toolkit # Specify version if needed, e.g., 11.3
   - conda-forge::torchmetrics>=0.9
   - conda-forge::pyyaml
   - conda-forge::matplotlib
