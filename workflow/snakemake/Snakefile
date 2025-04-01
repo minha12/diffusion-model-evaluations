@@ -163,20 +163,25 @@ rule evaluate_model:
             --ground-truth {input.ground_truth} \
             --output {output.directory}
         """
-# Rule to generate comparison report for image quality metrics
+def get_metrics_dir(wildcards):
+    return METRICS_DIR_TPL.replace('/{model}', '')
+
 rule generate_report:
     input:
-        metrics=expand(f"{METRICS_DIR_TPL}/metrics_results.yaml", model=MODELS)
+        metrics_dir=expand(f"{METRICS_DIR_TPL}/metrics_results.yaml", model=MODELS)
     output:
         directory(f"{RESULTS_DIR}/visualizations")
     conda: config["conda_envs"]["default"]
+    params:
+        metrics_dir = get_metrics_dir
     shell:
         """
         mkdir -p {output}
         python scripts/evaluation/generate_report.py \
-            --metrics-dir {METRICS_DIR_TPL.replace('/{{model}}', '')} \
+            --metrics-dir {params.metrics_dir} \
             --output-dir {output}
         """
+    
 # --- Downstream Task Evaluation ---
 # Rule to prepare metadata for downstream tasks
 rule prepare_downstream_data:
@@ -213,30 +218,33 @@ rule run_classification_eval:
         mode="{eval_mode}", # 'baseline' or 'generated'
         gen_img_dir=lambda wildcards: GENERATED_IMAGES_DIR_TPL.format(model=wildcards.model) if wildcards.eval_mode == 'generated' else "",
         model_name="{model}", # 'baseline' or actual model name
-        base_dir=BASE_DIR
+        base_dir=BASE_DIR,
+        enabled=lambda wildcards: config.get("downstream_tasks", {}).get("classification", {}).get("enabled", False)
     conda: config["conda_envs"]["downstream"]
-    resources: gpus=1 # Training needs GPU
-    # Only run if classification is enabled in config
-    run:
-        if config.get("downstream_tasks", {}).get("classification", {}).get("enabled", False):
-            # Construct the shell command
-            gen_dir_arg = f"--generated-images-dir {params.gen_img_dir}" if params.mode == 'generated' else ""
-            shell(
-                """
-                python scripts/evaluation/downstream_classification_eval.py \
-                    --config-path {input.config} \
-                    --metadata-path {input.metadata} \
-                    --output-dir {output.out_dir} \
-                    --mode {params.mode} \
-                    {gen_dir_arg} \
-                    --base-dir {params.base_dir}
-                """
-            )
-        else:
-            # If disabled, create dummy output to satisfy Snakemake
-            Path(output.out_dir).mkdir(parents=True, exist_ok=True)
-            Path(output.results).touch()
-            print(f"Skipping classification for {params.model_name} as it's disabled in config.")
+    resources: gpus=4 # Training needs GPU
+    shell:
+        """
+        if [ "{params.enabled}" = "True" ]; then
+            gen_dir_arg=""
+            if [ "{params.mode}" = "generated" ]; then
+                gen_dir_arg="--generated-images-dir {params.gen_img_dir}"
+            fi
+            
+            mkdir -p {output.out_dir}
+            
+            python scripts/evaluation/downstream_classification_eval.py \
+                --config-path {input.config} \
+                --metadata-path {input.metadata} \
+                --output-dir {output.out_dir} \
+                --mode {params.mode} \
+                $gen_dir_arg \
+                --base-dir {params.base_dir}
+        else
+            mkdir -p {output.out_dir}
+            touch {output.results}
+            echo "Skipping classification for {params.model_name} as it's disabled in config."
+        fi
+        """
 # Rule for Downstream Segmentation Evaluation
 rule run_segmentation_eval:
     input:
@@ -250,27 +258,33 @@ rule run_segmentation_eval:
         mode="{eval_mode}",
         gen_img_dir=lambda wildcards: GENERATED_IMAGES_DIR_TPL.format(model=wildcards.model) if wildcards.eval_mode == 'generated' else "",
         model_name="{model}",
-        base_dir=BASE_DIR
+        base_dir=BASE_DIR,
+        enabled=lambda wildcards: config.get("downstream_tasks", {}).get("segmentation", {}).get("enabled", False)
     conda: config["conda_envs"]["downstream"]
-    resources: gpus=1
-    run:
-        if config.get("downstream_tasks", {}).get("segmentation", {}).get("enabled", False):
-            gen_dir_arg = f"--generated-images-dir {params.gen_img_dir}" if params.mode == 'generated' else ""
-            shell(
-                """
-                python scripts/evaluation/downstream_segmentation_eval.py \
-                    --config-path {input.config} \
-                    --metadata-path {input.metadata} \
-                    --output-dir {output.out_dir} \
-                    --mode {params.mode} \
-                    {gen_dir_arg} \
-                    --base-dir {params.base_dir}
-                """
-            )
-        else:
-            Path(output.out_dir).mkdir(parents=True, exist_ok=True)
-            Path(output.results).touch()
-            print(f"Skipping segmentation for {params.model_name} as it's disabled in config.")
+    resources: gpus=4
+    shell:
+        """
+        if [ "{params.enabled}" = "True" ]; then
+            gen_dir_arg=""
+            if [ "{params.mode}" = "generated" ]; then
+                gen_dir_arg="--generated-images-dir {params.gen_img_dir}"
+            fi
+            
+            mkdir -p {output.out_dir}
+            
+            python scripts/evaluation/downstream_segmentation_eval.py \
+                --config-path {input.config} \
+                --metadata-path {input.metadata} \
+                --output-dir {output.out_dir} \
+                --mode {params.mode} \
+                $gen_dir_arg \
+                --base-dir {params.base_dir}
+        else
+            mkdir -p {output.out_dir}
+            touch {output.results}
+            echo "Skipping segmentation for {params.model_name} as it's disabled in config."
+        fi
+        """
 # --- Aggregation/Reporting for Downstream Tasks (Optional) ---
 # rule aggregate_downstream_results:
 #     input:
