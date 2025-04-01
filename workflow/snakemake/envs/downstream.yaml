@@ -1,0 +1,23 @@
+name: downstream-eval
+channels:
+  - pytorch
+  - nvidia # If using GPU
+  - conda-forge
+dependencies:
+  - python=3.9 # Or your preferred version
+  - pip
+  - pytorch::pytorch>=1.10 # Check compatibility
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pytorch::cuda-toolkit # Specify version if needed, e.g., 11.3
+  - conda-forge::torchmetrics>=0.9
+  - conda-forge::pyyaml
+  - conda-forge::matplotlib
+  - conda-forge::pandas # Useful for handling data splits/metadata
+  - conda-forge::scikit-learn # For metrics like confusion matrix, AUC
+  - conda-forge::tqdm
+  - conda-forge::pillow
+  - pip:
+      # A popular library for segmentation models
+      - segmentation-models-pytorch>=0.3.0
+      # - fire # If you use fire for CLIs in downstream scripts
