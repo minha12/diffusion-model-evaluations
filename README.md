@@ -91,7 +91,7 @@ The project uses Snakemake to manage the evaluation workflow. The main workflow 
 To run the complete workflow:
 
 ```bash
-snakemake -s workflow/snakemake/Snakefile --use-conda --cores all
+snakemake --resources gpus=4 -s workflow/snakemake/Snakefile --use-conda --cores all
 ```
 
 To run specific steps:
@@ -101,7 +101,7 @@ To run specific steps:
 snakemake -s workflow/snakemake/Snakefile --use-conda --cores all prepare_dataset
 
 # Run inference only
-snakemake -s workflow/snakemake/Snakefile --use-conda --cores all run_all_inference
+snakemake --resources gpus=4 -s workflow/snakemake/Snakefile --use-conda --cores all run_all_inference
 
 # Run evaluation only
 snakemake -s workflow/snakemake/Snakefile --use-conda --cores all evaluate_all_models
