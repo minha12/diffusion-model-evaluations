@@ -25,7 +25,7 @@ inference:
   seed: 42
 
 # Dataset information
-dataset_name: &dataset_name "drsk_1k_seed_42"
+dataset_name: &dataset_name "drsk-1k-seed-42"
 dataset: *dataset_name  # Using the alias to reference the anchor
 
 # Data source information
@@ -55,8 +55,8 @@ downstream_tasks:
     # 'multiclass_dominant': Label is the most frequent class (excluding Unknown/Background)
     labeling_strategy: "binary_carcinoma"
     carcinoma_threshold: 0.1 # Minimum fraction of carcinoma pixels for binary label 1
-    num_classes: 2 # Adjust based on labeling_strategy (2 for binary, 3+ for multiclass)
-    class_names: ["Other", "Carcinoma"] # Corresponds to binary_carcinoma strategy
+    num_classes: 3 # Adjust based on labeling_strategy (2 for binary, 3+ for multiclass)
+    class_names: ["Inflammatory/Reactive", "Carcinoma", "Normal"] # Corresponds to binary_carcinoma strategy
     # You might need to adjust num_classes and class_names if using multiclass
     # class_names_multiclass: ["Inflammatory/Reactive", "Carcinoma", "Normal"] # Example for multiclass
   segmentation:
