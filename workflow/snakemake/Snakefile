@@ -39,6 +39,8 @@ if config.get("downstream_tasks", {}).get("enabled", False):
              all_outputs.append(f"{RESULTS_DIR}/downstream_eval/classification/generated/{model}/classification_results.json")
         if config["downstream_tasks"].get("segmentation", {}).get("enabled", False):
              all_outputs.append(f"{RESULTS_DIR}/downstream_eval/segmentation/generated/{model}/segmentation_results.json")
+    # Add the downstream report marker
+    all_outputs.append(f"{RESULTS_DIR}/downstream_eval/.report_complete")
 rule all:
     input: all_outputs
 # --- Dataset Preparation ---
@@ -166,6 +168,35 @@ rule evaluate_model:
 def get_metrics_dir(wildcards):
     return METRICS_DIR_TPL.replace('/{model}', '')
 
+# --- Downstream Task Reporting ---
+def get_all_downstream_results(wildcards):
+    """Helper function to gather all expected downstream result files."""
+    outputs = []
+    # Define tasks and eval modes based on your config or expectations
+    tasks = []
+    if config.get("downstream_tasks", {}).get("classification", {}).get("enabled", False):
+        tasks.append("classification")
+    if config.get("downstream_tasks", {}).get("segmentation", {}).get("enabled", False):
+        tasks.append("segmentation")
+
+    eval_modes = ['baseline'] # Baseline is always present conceptually
+    if len(MODELS) > 0:       # Only add 'generated' if models exist
+         eval_modes.append('generated')
+
+    # Baseline results
+    for task in tasks:
+        outputs.append(f"{RESULTS_DIR}/downstream_eval/{task}/baseline/baseline/{task}_results.json")
+
+    # Generated results per model
+    for task in tasks:
+        for model in MODELS:
+             # Check if the specific task is enabled for generated data
+             if config.get("downstream_tasks", {}).get(task, {}).get("enabled", False):
+                 outputs.append(f"{RESULTS_DIR}/downstream_eval/{task}/generated/{model}/{task}_results.json")
+
+    # Filter out duplicates just in case
+    return list(set(outputs))
+
 rule generate_report:
     input:
         metrics_dir=expand(f"{METRICS_DIR_TPL}/metrics_results.yaml", model=MODELS)
@@ -284,6 +315,24 @@ rule run_segmentation_eval:
             touch {output.results}
             echo "Skipping segmentation for {params.model_name} as it's disabled in config."
         fi
+        """
+# Rule for generating downstream task report
+rule generate_downstream_report:
+    input:
+        # Depend on all potential downstream result files
+        results=get_all_downstream_results
+    output:
+        # Create a marker file to indicate completion
+        marker=touch(f"{RESULTS_DIR}/downstream_eval/.report_complete")
+    params:
+        results_base_dir=RESULTS_DIR, # Pass the base results directory
+        output_dir=f"{RESULTS_DIR}/downstream_eval" # Directory where the script will create 'visualizations' subdir
+    conda: config["conda_envs"]["default"]
+    shell:
+        """
+        python scripts/evaluation/generate_downstream_report.py \
+            --results-dir {params.results_base_dir} \
+            --output-dir {params.output_dir}
         """
 # --- Aggregation/Reporting for Downstream Tasks (Optional) ---
 # rule aggregate_downstream_results:
