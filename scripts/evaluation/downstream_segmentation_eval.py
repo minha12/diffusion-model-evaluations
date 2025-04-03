@@ -26,7 +26,22 @@ def load_config(config_path):
         return yaml.safe_load(f)
 
 # --- Augmentation Functions ---
-def get_training_augmentation(img_size):
+def get_training_augmentation(img_size, encoder_name=None):
+    # Get encoder-specific preprocessing parameters if encoder_name is provided
+    if encoder_name:
+        try:
+            params = smp.encoders.get_preprocessing_params(encoder_name)
+            mean = params.get('mean', (0.485, 0.456, 0.406))
+            std = params.get('std', (0.229, 0.224, 0.225))
+        except:
+            # Fallback to default mean and std if encoder not found
+            mean = (0.485, 0.456, 0.406)
+            std = (0.229, 0.224, 0.225)
+    else:
+        # Default ImageNet mean and std
+        mean = (0.485, 0.456, 0.406)
+        std = (0.229, 0.224, 0.225)
+    
     train_transform = [
         A.Resize(height=img_size[0], width=img_size[1]), # Resize first
         A.HorizontalFlip(p=0.5),
@@ -55,17 +70,32 @@ def get_training_augmentation(img_size):
             ],
             p=0.9,
         ),
-        # Get normalization parameters from encoder
-        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        # Use encoder-specific normalization
+        A.Normalize(mean=mean, std=std),
         ToTensorV2(),
     ]
     return A.Compose(train_transform)
 
-def get_validation_testing_augmentation(img_size):
+def get_validation_testing_augmentation(img_size, encoder_name=None):
     """Only Resize, Normalize, and Convert to Tensor for validation/testing."""
+    # Get encoder-specific preprocessing parameters if encoder_name is provided
+    if encoder_name:
+        try:
+            params = smp.encoders.get_preprocessing_params(encoder_name)
+            mean = params.get('mean', (0.485, 0.456, 0.406))
+            std = params.get('std', (0.229, 0.224, 0.225))
+        except:
+            # Fallback to default mean and std if encoder not found
+            mean = (0.485, 0.456, 0.406)
+            std = (0.229, 0.224, 0.225)
+    else:
+        # Default ImageNet mean and std
+        mean = (0.485, 0.456, 0.406)
+        std = (0.229, 0.224, 0.225)
+        
     test_transform = [
          A.Resize(height=img_size[0], width=img_size[1]),
-         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+         A.Normalize(mean=mean, std=std),
          ToTensorV2(),
     ]
     return A.Compose(test_transform)
@@ -237,6 +267,7 @@ def main(args):
     config = load_config(args.config_path)
     seg_config = config['downstream_tasks']['segmentation']
     num_classes = seg_config['num_classes']
+    encoder_name = seg_config['encoder']
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -265,9 +296,9 @@ def main(args):
     # Define image size and get augmentations
     img_size = tuple(config.get('image_size', [256, 256]))
     
-    # Create separate augmentation pipelines
-    train_augmentation = get_training_augmentation(img_size)
-    eval_augmentation = get_validation_testing_augmentation(img_size)
+    # Create separate augmentation pipelines with encoder-specific normalization
+    train_augmentation = get_training_augmentation(img_size, encoder_name)
+    eval_augmentation = get_validation_testing_augmentation(img_size, encoder_name)
 
     # Create datasets with proper augmentations
     train_dataset = SegmentationDataset(
@@ -303,7 +334,7 @@ def main(args):
     # --- Model Initialization ---
     model = get_segmentation_model(
         model_name=seg_config['model'],
-        encoder=seg_config['encoder'],
+        encoder=encoder_name,
         num_classes=num_classes
     ).to(device)
     
