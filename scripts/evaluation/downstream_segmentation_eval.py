@@ -28,7 +28,7 @@ def load_config(config_path):
 # --- Augmentation Functions ---
 def get_training_augmentation(img_size, encoder_name=None):
     # Get encoder-specific preprocessing parameters if encoder_name is provided
-    if encoder_name:
+    if (encoder_name):
         try:
             params = smp.encoders.get_preprocessing_params(encoder_name)
             mean = params.get('mean', (0.485, 0.456, 0.406))
@@ -79,7 +79,7 @@ def get_training_augmentation(img_size, encoder_name=None):
 def get_validation_testing_augmentation(img_size, encoder_name=None):
     """Only Resize, Normalize, and Convert to Tensor for validation/testing."""
     # Get encoder-specific preprocessing parameters if encoder_name is provided
-    if encoder_name:
+    if (encoder_name):
         try:
             params = smp.encoders.get_preprocessing_params(encoder_name)
             mean = params.get('mean', (0.485, 0.456, 0.406))
@@ -219,10 +219,15 @@ def evaluate(model, dataloader, criterion, device, num_classes):
     model.eval()
     running_loss = 0.0
 
-    # Use torchmetrics for mIoU and Pixel Accuracy
-    # ignore_index=0 might be useful if 'Unknown' class should be excluded from metric
-    miou_metric = torchmetrics.JaccardIndex(task="multiclass", num_classes=num_classes, average='macro').to(device) # mIoU
+    # Use torchmetrics for Pixel Accuracy only
     accuracy_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, average='macro').to(device) # Pixel Accuracy
+    
+    # For IoU, we'll use SMP's implementation like in the tutorial
+    # Initialize tp, fp, fn, tn accumulators
+    tp_sum = 0
+    fp_sum = 0
+    fn_sum = 0
+    tn_sum = 0
 
     with torch.no_grad():
         for images, masks in tqdm(dataloader, desc="Evaluating", leave=False):
@@ -240,14 +245,28 @@ def evaluate(model, dataloader, criterion, device, num_classes):
 
             preds = torch.argmax(outputs, dim=1) # (B, H, W)
 
-            # Update metrics
-            miou_metric.update(preds, masks)
+            # Update accuracy metric
             accuracy_metric.update(preds, masks)
+            
+            # Compute TP, FP, FN, TN using SMP's implementation
+            tp, fp, fn, tn = smp.metrics.get_stats(
+                preds, 
+                masks, 
+                mode='multiclass', 
+                num_classes=num_classes
+            )
+            
+            # Accumulate metrics
+            tp_sum += tp
+            fp_sum += fp
+            fn_sum += fn
+            tn_sum += tn
 
     eval_loss = running_loss / len(dataloader.dataset) # Adjust divisor if dataset contains None
 
     # Compute final metrics
-    final_miou = miou_metric.compute().item()
+    # Calculate IoU using SMP's implementation (same as in the tutorial)
+    final_miou = smp.metrics.iou_score(tp_sum, fp_sum, fn_sum, tn_sum, reduction="micro").item()
     final_accuracy = accuracy_metric.compute().item()
 
     metrics = {
@@ -257,7 +276,6 @@ def evaluate(model, dataloader, criterion, device, num_classes):
     }
 
     # Reset metrics
-    miou_metric.reset()
     accuracy_metric.reset()
 
     return metrics
