@@ -147,7 +147,7 @@ def get_segmentation_model(model_name, encoder, num_classes, pretrained='imagene
     return model
 
 # --- Training ---
-def train_epoch(model, dataloader, criterion, optimizer, device):
+def train_epoch(model, dataloader, criterion, optimizer, device, scheduler=None):
     model.train()
     running_loss = 0.0
 
@@ -165,6 +165,10 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         loss = criterion(outputs, masks) # DiceLoss expects (B, C, H, W) and (B, H, W)
         loss.backward()
         optimizer.step()
+        
+        # Step the scheduler if provided (for step-based schedulers)
+        if scheduler is not None:
+            scheduler.step()
 
         running_loss += loss.item() * images.size(0)
 
@@ -298,12 +302,21 @@ def main(args):
     # criterion = smp_losses.DiceLoss(mode='multiclass', from_logits=True) + 0.5 * nn.CrossEntropyLoss()
     
     optimizer = optim.Adam(model.parameters(), lr=seg_config['learning_rate'])
+    
+    # Add learning rate scheduler
+    # T_max is set to total steps (epochs * batches_per_epoch)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 
+        T_max=seg_config['num_epochs'] * len(train_loader), 
+        eta_min=1e-6
+    )
 
     # --- Training Loop ---
     print("Starting training...")
     for epoch in range(seg_config['num_epochs']):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-        print(f"Epoch {epoch+1}/{seg_config['num_epochs']} - Train Loss: {train_loss:.4f}")
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, scheduler)
+        current_lr = optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch+1}/{seg_config['num_epochs']} - Train Loss: {train_loss:.4f} - LR: {current_lr:.6f}")
         # Optional: Add validation loop here if desired
 
     # --- Final Evaluation ---
