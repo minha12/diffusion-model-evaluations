@@ -7,13 +7,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms as T
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
 import json
 from pathlib import Path
 import torchmetrics # Use torchmetrics
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
 # --- Import segmentation_models_pytorch ---
 import segmentation_models_pytorch as smp
@@ -23,14 +24,57 @@ def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
+# --- Augmentation Functions ---
+def get_training_augmentation(img_size):
+    train_transform = [
+        A.Resize(height=img_size[0], width=img_size[1]), # Resize first
+        A.HorizontalFlip(p=0.5),
+        A.ShiftScaleRotate(scale_limit=0.1, rotate_limit=15, shift_limit=0.1, p=0.5, border_mode=0),
+        A.GaussNoise(p=0.2),
+        A.OneOf(
+            [
+                A.CLAHE(p=1),
+                A.RandomBrightnessContrast(p=1),
+                A.RandomGamma(p=1),
+            ],
+            p=0.9,
+        ),
+        A.OneOf(
+            [
+                A.Sharpen(p=1),
+                A.Blur(blur_limit=3, p=1),
+                A.MotionBlur(blur_limit=3, p=1),
+            ],
+            p=0.9,
+        ),
+        A.OneOf(
+            [
+                A.RandomBrightnessContrast(p=1),
+                A.HueSaturationValue(p=1),
+            ],
+            p=0.9,
+        ),
+        A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ToTensorV2(),
+    ]
+    return A.Compose(train_transform)
+
+def get_validation_testing_augmentation(img_size):
+    """Only Resize, Normalize, and Convert to Tensor for validation/testing."""
+    test_transform = [
+         A.Resize(height=img_size[0], width=img_size[1]),
+         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+         ToTensorV2(),
+    ]
+    return A.Compose(test_transform)
+
 # --- Dataset ---
 class SegmentationDataset(Dataset):
-    def __init__(self, metadata_df, image_dir, mask_dir, img_transform=None, mask_transform=None, use_generated=False, generated_suffix=".png", base_dir="."):
+    def __init__(self, metadata_df, image_dir, mask_dir, augmentation=None, use_generated=False, generated_suffix=".png", base_dir="."):
         self.metadata = metadata_df
         self.image_dir = Path(base_dir) / image_dir if image_dir else None # Allow empty image_dir for real data paths in metadata
         self.mask_dir = Path(base_dir) / mask_dir if mask_dir else None # Masks always come from real data path in metadata
-        self.img_transform = img_transform
-        self.mask_transform = mask_transform
+        self.augmentation = augmentation
         self.use_generated = use_generated
         self.generated_suffix = generated_suffix
         self.base_dir = Path(base_dir)
@@ -61,31 +105,28 @@ class SegmentationDataset(Dataset):
              return None, None
 
         try:
-            image = Image.open(img_path).convert('RGB')
-            # Use plain-segmentation masks (assume single channel, 0-4 values)
-            mask = Image.open(mask_path) # Should be L mode (grayscale)
+            # Load image using PIL
+            image = Image.open(str(img_path)).convert('RGB')
+            image = np.array(image)  # Convert to numpy array for albumentations
 
-            # Apply transforms
-            if self.img_transform:
-                image = self.img_transform(image)
+            # Load mask using PIL
+            mask = Image.open(str(mask_path)).convert('L')  # Convert to grayscale
+            mask = np.array(mask)  # Convert to numpy array for albumentations
 
-            # Convert mask to tensor *without* normalization
-            # Mask should contain class indices (long type)
-            if self.mask_transform:
-                 mask = self.mask_transform(mask) # Apply geometric transforms like resize/crop
+            # Apply augmentations
+            if self.augmentation:
+                transformed = self.augmentation(image=image, mask=mask)
+                image = transformed['image']  # Now a Tensor (CxHxW)
+                mask = transformed['mask']    # Still HxW but as tensor
+            
+            # Ensure mask is LongTensor 
+            if isinstance(mask, torch.Tensor):
+                mask = mask.long()
             else:
-                 # Basic conversion if no other transform
-                 img_size = tuple(load_config('config/evaluation.yaml').get('image_size', [256, 256])) # Get size
-                 mask = T.functional.resize(mask, img_size, interpolation=T.InterpolationMode.NEAREST) # Ensure size match, use NEAREST for masks
-
-            mask = torch.from_numpy(np.array(mask)).long() # Convert to LongTensor
-
-            # Remove channel dimension if mask is (1, H, W) -> (H, W)
-            if mask.ndim == 3 and mask.shape[0] == 1:
-                 mask = mask.squeeze(0)
+                mask = torch.from_numpy(mask).long()
 
         except Exception as e:
-            print(f"Error loading image/mask pair {image_id}: {e}")
+            print(f"Error loading/transforming image/mask pair {image_id}: {e}")
             return None, None
 
         return image, mask
@@ -207,21 +248,31 @@ def main(args):
     else:
         raise ValueError("Mode must be 'baseline' or 'generated'")
 
-    # Define transforms
+    # Define image size and get augmentations
     img_size = tuple(config.get('image_size', [256, 256]))
-    img_transform = T.Compose([
-        T.Resize(img_size),
-        T.ToTensor(),
-        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-    # Mask transform only needs resizing (nearest neighbor)
-    mask_transform = T.Compose([
-        T.Resize(img_size, interpolation=T.InterpolationMode.NEAREST),
-    ])
+    
+    # Create separate augmentation pipelines
+    train_augmentation = get_training_augmentation(img_size)
+    eval_augmentation = get_validation_testing_augmentation(img_size)
 
-    # Create datasets
-    train_dataset = SegmentationDataset(train_df, train_image_dir, mask_dir="", img_transform=img_transform, mask_transform=mask_transform, use_generated=use_train_generated, base_dir=args.base_dir)
-    test_dataset = SegmentationDataset(test_df, test_image_dir, mask_dir="", img_transform=img_transform, mask_transform=mask_transform, use_generated=False, base_dir=args.base_dir) # Always test on real
+    # Create datasets with proper augmentations
+    train_dataset = SegmentationDataset(
+        train_df, 
+        train_image_dir, 
+        mask_dir="", 
+        augmentation=train_augmentation, 
+        use_generated=use_train_generated, 
+        base_dir=args.base_dir
+    )
+    
+    test_dataset = SegmentationDataset(
+        test_df, 
+        test_image_dir, 
+        mask_dir="", 
+        augmentation=eval_augmentation, 
+        use_generated=False, 
+        base_dir=args.base_dir
+    )
 
     # Collate function to handle loading errors
     def collate_fn(batch):
