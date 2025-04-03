@@ -15,24 +15,8 @@ import json
 from pathlib import Path
 import torchmetrics # Use torchmetrics
 
-# --- Try importing segmentation_models_pytorch ---
-try:
-    import segmentation_models_pytorch as smp
-    SMP_AVAILABLE = True
-except ImportError:
-    SMP_AVAILABLE = False
-    print("Warning: segmentation-models-pytorch not found. Using basic U-Net implementation.")
-    # Add a basic U-Net implementation here if needed, or require SMP
-    class BasicUNet(nn.Module): # Placeholder - Replace with a real basic U-Net if needed
-        def __init__(self, n_channels, n_classes):
-            super().__init__()
-            self.n_channels = n_channels
-            self.n_classes = n_classes
-            # Dummy implementation
-            self.conv = nn.Conv2d(n_channels, n_classes, kernel_size=1)
-        def forward(self, x):
-            return self.conv(x)
-
+# --- Import segmentation_models_pytorch ---
+import segmentation_models_pytorch as smp
 
 # --- Configuration ---
 def load_config(config_path):
@@ -108,7 +92,7 @@ class SegmentationDataset(Dataset):
 
 # --- Model ---
 def get_segmentation_model(model_name, encoder, num_classes, pretrained='imagenet'):
-    if SMP_AVAILABLE and model_name == 'unet':
+    if model_name == 'unet':
         model = smp.Unet(
             encoder_name=encoder,
             encoder_weights=pretrained,
@@ -116,11 +100,8 @@ def get_segmentation_model(model_name, encoder, num_classes, pretrained='imagene
             classes=num_classes,
         )
         print(f"Using segmentation_models_pytorch U-Net with encoder: {encoder}")
-    elif model_name == 'unet':
-        print("Using basic U-Net implementation.")
-        model = BasicUNet(n_channels=3, n_classes=num_classes) # Use the placeholder/basic U-Net
     else:
-         raise ValueError(f"Segmentation model {model_name} not supported.")
+        raise ValueError(f"Segmentation model {model_name} not supported.")
     return model
 
 # --- Training ---
