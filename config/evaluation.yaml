@@ -53,7 +53,7 @@ downstream_tasks:
     # How to derive labels from masks:
     # 'binary_carcinoma': Label 1 if carcinoma > threshold, else 0
     # 'multiclass_dominant': Label is the most frequent class (excluding Unknown/Background)
-    labeling_strategy: "binary_carcinoma"
+    labeling_strategy: "multiclass_dominant"
     carcinoma_threshold: 0.1 # Minimum fraction of carcinoma pixels for binary label 1
     num_classes: 3 # Adjust based on labeling_strategy (2 for binary, 3+ for multiclass)
     class_names: ["Inflammatory/Reactive", "Carcinoma", "Normal"] # Corresponds to binary_carcinoma strategy
@@ -61,8 +61,8 @@ downstream_tasks:
     # class_names_multiclass: ["Inflammatory/Reactive", "Carcinoma", "Normal"] # Example for multiclass
   segmentation:
     enabled: true
-    model: "unet" # Can be 'unet' (basic implementation) or specific from segmentation-models-pytorch
-    encoder: "resnet34" # Encoder for U-Net (if using segmentation-models-pytorch)
+    model: "fpn" # Changed from 'unet' to 'fpn'
+    encoder: "resnext50_32x4d" # Changed from 'resnet34' to 'resnext50_32x4d'
     num_epochs: 20
     batch_size: 8
     learning_rate: 0.001

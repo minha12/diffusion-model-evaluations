@@ -55,6 +55,7 @@ def get_training_augmentation(img_size):
             ],
             p=0.9,
         ),
+        # Get normalization parameters from encoder
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
     ]
@@ -134,7 +135,7 @@ class SegmentationDataset(Dataset):
 
 # --- Model ---
 def get_segmentation_model(model_name, encoder, num_classes, pretrained='imagenet'):
-    if model_name == 'unet':
+    if model_name.lower() == 'unet':
         model = smp.Unet(
             encoder_name=encoder,
             encoder_weights=pretrained,
@@ -142,6 +143,14 @@ def get_segmentation_model(model_name, encoder, num_classes, pretrained='imagene
             classes=num_classes,
         )
         print(f"Using segmentation_models_pytorch U-Net with encoder: {encoder}")
+    elif model_name.lower() == 'fpn':
+        model = smp.FPN(
+            encoder_name=encoder,
+            encoder_weights=pretrained,
+            in_channels=3,
+            classes=num_classes,
+        )
+        print(f"Using segmentation_models_pytorch FPN with encoder: {encoder}")
     else:
         raise ValueError(f"Segmentation model {model_name} not supported.")
     return model
@@ -285,14 +294,17 @@ def main(args):
         if not batch: return torch.Tensor(), torch.Tensor()
         return torch.utils.data.dataloader.default_collate(batch)
 
-    train_loader = DataLoader(train_dataset, batch_size=seg_config['batch_size'], shuffle=True, num_workers=4, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=seg_config['batch_size'], shuffle=False, num_workers=4, collate_fn=collate_fn)
+    # May need to lower batch size for more complex architecture
+    batch_size = seg_config.get('batch_size', 8)  # Default to smaller batch size
+    
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=collate_fn)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=collate_fn)
 
     # --- Model Initialization ---
     model = get_segmentation_model(
-        seg_config['model'],
-        seg_config.get('encoder', 'resnet34'), # Provide default encoder
-        num_classes
+        model_name=seg_config['model'],
+        encoder=seg_config['encoder'],
+        num_classes=num_classes
     ).to(device)
     
     # Use segmentation-specific DiceLoss instead of CrossEntropyLoss
