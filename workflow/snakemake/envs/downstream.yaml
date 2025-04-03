@@ -20,4 +20,5 @@ dependencies:
   - pip:
       # A popular library for segmentation models
       - segmentation-models-pytorch>=0.3.0
-      # - fire # If you use fire for CLIs in downstream scripts
+      - fire # If you use fire for CLIs in downstream scripts
+      - albumentations
