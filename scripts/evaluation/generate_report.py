@@ -153,21 +153,105 @@ def create_radar_chart(metrics_data, output_dir):
     plt.savefig(os.path.join(output_dir, 'radar_chart_comparison.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
+def create_radar_chart(metrics_data, output_dir):
+    """Create a radar chart comparing all models across metrics."""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Get metrics to plot (exclude std values)
+    metrics_to_plot = sorted(set(k for model in metrics_data.values() 
+                              for k in model.keys() 
+                              if not k.endswith('_std')))
+    
+    # Number of metrics (categories)
+    N = len(metrics_to_plot)
+    
+    # What will be the angle of each axis in the plot
+    angles = [n / float(N) * 2 * np.pi for n in range(N)]
+    angles += angles[:1]  # Close the loop
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(12, 10), subplot_kw=dict(polar=True))
+    
+    # Add lines for each model
+    colors = plt.cm.tab10(np.linspace(0, 1, len(metrics_data)))
+    
+    # Normalize metrics for radar chart
+    # First get min and max for each metric
+    metric_ranges = {}
+    for metric in metrics_to_plot:
+        values = [data[metric] for data in metrics_data.values() if metric in data]
+        if values:
+            # For FID, lower is better, so we invert the normalization
+            if metric == 'fid' or metric == 'kid_mean' or metric.startswith('lpips'):
+                metric_ranges[metric] = (min(values), max(values), True)  # Third value indicates inversion
+            else:
+                metric_ranges[metric] = (min(values), max(values), False)
+    
+    # Draw the radar chart for each model
+    for i, (model, metrics) in enumerate(metrics_data.items()):
+        values = []
+        for metric in metrics_to_plot:
+            if metric in metrics:
+                min_val, max_val, invert = metric_ranges[metric]
+                # Avoid division by zero
+                if max_val == min_val:
+                    normalized = 0.5
+                else:
+                    normalized = (metrics[metric] - min_val) / (max_val - min_val)
+                    
+                # Invert for metrics where lower is better
+                if invert:
+                    normalized = 1 - normalized
+                    
+                values.append(normalized)
+            else:
+                values.append(0)
+                
+        # Close the loop
+        values += values[:1]
+        
+        # Plot the model
+        ax.plot(angles, values, linewidth=2, linestyle='solid', label=model, color=colors[i])
+        ax.fill(angles, values, alpha=0.1, color=colors[i])
+    
+    # Fix axis to go in the right order and start at 12 o'clock
+    ax.set_theta_offset(np.pi / 2)
+    ax.set_theta_direction(-1)
+    
+    # Draw axis lines for each angle and label
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(metrics_to_plot)
+    
+    # Draw y-labels (0-1)
+    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'])
+    ax.set_ylim(0, 1)
+    
+    # Add legend
+    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1))
+    
+    plt.title('Model Comparison Across All Metrics', size=20, y=1.08)
+    plt.tight_layout()
+    
+    # Save the radar chart
+    plt.savefig(os.path.join(output_dir, 'radar_chart_comparison.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
 def create_summary_grid(metrics_data, output_dir):
     """Create a summary grid with all important metrics."""
     plt.figure(figsize=(16, 12))
     
-    # Define key metrics to highlight
-    key_metrics = ['fid', 'kid_mean', 'lpips_mean', 'psnr_mean', 'ssim_mean']
+    # Define key metrics to highlight - replace ssim_mean with ms_ssim_mean
+    key_metrics = ['fid', 'kid_mean', 'lpips_mean', 'psnr_mean', 'ms_ssim_mean']
     
     # Create a grid
     gs = GridSpec(2, 3, figure=plt.gcf())
     
     # Create bar charts for key metrics
     for i, metric in enumerate(key_metrics):
-        # Adjust placement to avoid overlap - SSIM_MEAN would be at position (1,1)
-        if i == 4:  # SSIM_MEAN
-            ax = plt.subplot(gs[1, 0])  # Place SSIM_MEAN at bottom-left
+        # Adjust placement to avoid overlap - MS_SSIM_MEAN would be at position (1,1)
+        if i == 4:  # MS_SSIM_MEAN
+            ax = plt.subplot(gs[1, 0])  # Place MS_SSIM_MEAN at bottom-left
         else:
             ax = plt.subplot(gs[i//3, i%3])
         
@@ -241,6 +325,8 @@ def create_summary_grid(metrics_data, output_dir):
     ax.set_theta_direction(-1)
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(metrics_to_plot)
+    ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.set_yticklabels(['0.2', '0.4', '0.6', '0.8', '1.0'])
     ax.set_ylim(0, 1)
     
     # Add legend
