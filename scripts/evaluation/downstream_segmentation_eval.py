@@ -18,6 +18,7 @@ from albumentations.pytorch import ToTensorV2
 
 # --- Import segmentation_models_pytorch ---
 import segmentation_models_pytorch as smp
+from segmentation_models_pytorch import losses as smp_losses  # Import SMP losses
 
 # --- Configuration ---
 def load_config(config_path):
@@ -161,7 +162,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
 
         optimizer.zero_grad()
         outputs = model(images) # Shape: (B, C, H, W)
-        loss = criterion(outputs, masks) # CrossEntropyLoss expects (B, C, H, W) and (B, H, W)
+        loss = criterion(outputs, masks) # DiceLoss expects (B, C, H, W) and (B, H, W)
         loss.backward()
         optimizer.step()
 
@@ -289,8 +290,13 @@ def main(args):
         seg_config.get('encoder', 'resnet34'), # Provide default encoder
         num_classes
     ).to(device)
-    # Use CrossEntropyLoss for multi-class segmentation
-    criterion = nn.CrossEntropyLoss() # Can add class weights here if needed
+    
+    # Use segmentation-specific DiceLoss instead of CrossEntropyLoss
+    criterion = smp_losses.DiceLoss(mode='multiclass', from_logits=True)
+    
+    # Optionally use a combined loss function for better results
+    # criterion = smp_losses.DiceLoss(mode='multiclass', from_logits=True) + 0.5 * nn.CrossEntropyLoss()
+    
     optimizer = optim.Adam(model.parameters(), lr=seg_config['learning_rate'])
 
     # --- Training Loop ---
