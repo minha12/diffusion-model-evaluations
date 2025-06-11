@@ -22,10 +22,10 @@ inference:
   batch_size: 4
   num_inference_steps: 28 # Global default (fallback if not specified in model)
   resolution: 512
-  seed: 42
+  seed: 23
 
 # Dataset information
-dataset_name: &dataset_name "drsk-1k-seed-42"
+dataset_name: &dataset_name "drsk-1k-seed-23"
 dataset: *dataset_name  # Using the alias to reference the anchor
 
 # Data source information
@@ -36,7 +36,7 @@ data_sources:
 # Dataset preparation parameters
 dataset_preparation:
   num_samples: 1000
-  seed: 42
+  seed: 23
 
 # Accelerate config
 accelerate_config: "config/accelerate_config.yaml"
