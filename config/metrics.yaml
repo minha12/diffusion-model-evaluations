@@ -17,8 +17,8 @@ metrics:
   # Peak Signal-to-Noise Ratio
   psnr: {}
 
-  # Structural Similarity Index Measure
-  ssim: {}
+  # # Structural Similarity Index Measure
+  # ssim: {}
 
   # Multi-Scale Structural Similarity Index Measure
   ms_ssim: {}
