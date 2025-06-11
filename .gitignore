@@ -3,9 +3,7 @@
 data/**/*.png
 data/**/*.jpg
 
-results/**/*.png
-results/**/*.jpg
 .snakemake_timestamp
 prompts.txt
 *.ckpt
-results/
+results/**/generated_images
