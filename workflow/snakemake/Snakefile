@@ -252,7 +252,7 @@ rule run_classification_eval:
         base_dir=BASE_DIR,
         enabled=lambda wildcards: config.get("downstream_tasks", {}).get("classification", {}).get("enabled", False)
     conda: config["conda_envs"]["downstream"]
-    resources: gpus=4 # Training needs GPU
+    resources: gpus=1 # Training needs GPU
     shell:
         """
         if [ "{params.enabled}" = "True" ]; then
@@ -292,7 +292,7 @@ rule run_segmentation_eval:
         base_dir=BASE_DIR,
         enabled=lambda wildcards: config.get("downstream_tasks", {}).get("segmentation", {}).get("enabled", False)
     conda: config["conda_envs"]["downstream"]
-    resources: gpus=4
+    resources: gpus=1
     shell:
         """
         if [ "{params.enabled}" = "True" ]; then
