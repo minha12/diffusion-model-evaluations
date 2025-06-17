@@ -123,14 +123,14 @@ def ldm_cond_sample(config_path, ckpt_path, dataset, batch_size, steps, save_dir
             # Get learned conditioning
             cond = model.get_learned_conditioning(seg)
             
-            # Sample from the model
-            samples, _ = model.sample_log(
-                cond=cond, 
-                batch_size=len(seg), 
-                ddim=True,
-                ddim_steps=steps, 
-                eta=1.0
-            )
+            with model.ema_scope():
+                samples, _ = model.sample_log(
+                    cond=cond, 
+                    batch_size=batch_size, 
+                    ddim=True,
+                    ddim_steps=200, 
+                    eta=1.0
+                )
             
             # Decode the samples
             samples = model.decode_first_stage(samples)
