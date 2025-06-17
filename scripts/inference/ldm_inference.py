@@ -135,6 +135,9 @@ def ldm_cond_sample(config_path, ckpt_path, dataset, batch_size, steps, save_dir
             # Decode the samples
             samples = model.decode_first_stage(samples)
         
+        samples = torch.clamp(samples, -1.0, 1.0)
+        # Normalize samples from [-1,1] to [0,1] range
+        samples = (samples + 1.0) / 2.0
         # Save generated samples
         for j, sample in enumerate(samples):
             save_image(sample, os.path.join(save_dir, f"{file_names[j]}.png"))
