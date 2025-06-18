@@ -334,7 +334,7 @@ def main(args):
 
     # --- Training Loop ---
     best_f1 = 0
-    patience = 3
+    patience = 5
     patience_counter = 0
     best_model_state = None
 
