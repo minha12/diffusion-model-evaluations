@@ -299,7 +299,9 @@ def main(args):
     # Use weighted CrossEntropyLoss
     criterion = nn.CrossEntropyLoss(weight=weights)
 
-    optimizer = optim.Adam(model.parameters(), lr=cls_config['learning_rate'])
+    optimizer = optim.Adam(model.parameters(), 
+                      lr=cls_config['learning_rate'], 
+                      weight_decay=0.001)  # Add L2 regularization
 
     # --- Learning Rate Scheduler ---
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
