@@ -333,14 +333,42 @@ def main(args):
     )
 
     # --- Training Loop ---
+    best_f1 = 0
+    patience = 3
+    patience_counter = 0
+    best_model_state = None
+
     print("Starting training...")
     for epoch in range(cls_config['num_epochs']):
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         print(f"Epoch {epoch+1}/{cls_config['num_epochs']} - Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
-
-        # --- Learning Rate Scheduling ---
+        
+        # Validation
         val_metrics = evaluate(model, test_loader, criterion, device, num_classes)
-        scheduler.step(val_metrics['f1_score'])  # Use F1 score for LR scheduling
+        current_f1 = val_metrics['f1_score']
+        print(f"Validation F1: {current_f1:.4f}")
+        
+        # Learning Rate Scheduling
+        scheduler.step(current_f1)
+        
+        # Early stopping logic
+        if current_f1 > best_f1:
+            best_f1 = current_f1
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+            print(f"New best F1: {best_f1:.4f}")
+        else:
+            patience_counter += 1
+            print(f"F1 did not improve. Patience: {patience_counter}/{patience}")
+            
+        if patience_counter >= patience:
+            print("Early stopping triggered!")
+            break
+
+    # Load best model before final evaluation
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        print("Loaded best model for final evaluation")
 
     # --- Final Evaluation ---
     print("Starting final evaluation on test set...")
