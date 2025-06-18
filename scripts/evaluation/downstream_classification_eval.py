@@ -71,19 +71,31 @@ def get_model(model_name, num_classes, pretrained=True):
         # Modify the final layer for the number of classes
         if hasattr(model, 'fc'): # For ResNet, etc.
             num_ftrs = model.fc.in_features
-            model.fc = nn.Linear(num_ftrs, num_classes)
+            # Replace fc with a sequence that includes dropout
+            model.fc = nn.Sequential(
+                nn.Dropout(0.5),  # Add dropout with 0.5 probability
+                nn.Linear(num_ftrs, num_classes)
+            )
         elif hasattr(model, 'classifier'): # For VGG, DenseNet, etc.
              if isinstance(model.classifier, nn.Sequential):
-                # Find the last linear layer
-                last_layer_idx = -1
-                while not isinstance(model.classifier[last_layer_idx], nn.Linear):
-                    last_layer_idx -= 1
-                num_ftrs = model.classifier[last_layer_idx].in_features
-                model.classifier[last_layer_idx] = nn.Linear(num_ftrs, num_classes)
+                 # Find the last linear layer
+                 last_layer_idx = -1
+                 while not isinstance(model.classifier[last_layer_idx], nn.Linear):
+                     last_layer_idx -= 1
+                 num_ftrs = model.classifier[last_layer_idx].in_features
+                 
+                 # Insert dropout before the last layer
+                 model.classifier = nn.Sequential(
+                     *list(model.classifier[:last_layer_idx]),
+                     nn.Dropout(0.5),
+                     nn.Linear(num_ftrs, num_classes)
+                 )
              elif isinstance(model.classifier, nn.Linear): # Single classifier layer
                  num_ftrs = model.classifier.in_features
-                 model.classifier = nn.Linear(num_ftrs, num_classes)
-
+                 model.classifier = nn.Sequential(
+                     nn.Dropout(0.5),
+                     nn.Linear(num_ftrs, num_classes)
+                 )
         else:
             raise AttributeError(f"Model {model_name} structure not recognized for modification.")
     else:
