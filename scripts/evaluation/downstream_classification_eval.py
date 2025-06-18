@@ -268,15 +268,27 @@ def main(args):
 
     # Define transforms (adjust as needed)
     img_size = tuple(config.get('image_size', [256, 256])) # Get image size from main config if available
-    transform = transforms.Compose([
+    transform_train = transforms.Compose([
+        transforms.Resize((img_size[0] + 20, img_size[1] + 20)),  # Resize larger
+        transforms.RandomCrop(img_size),  # Then crop to desired size
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(15),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
+        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+    # Keep simpler transform for test data
+    transform_test = transforms.Compose([
         transforms.Resize(img_size),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]), # ImageNet norm
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
     # Create datasets
-    train_dataset = ClassificationDataset(train_df, train_image_dir, transform=transform, use_generated=use_train_generated, base_dir=args.base_dir)
-    test_dataset = ClassificationDataset(test_df, test_image_dir, transform=transform, use_generated=False, base_dir=args.base_dir) # Always test on real
+    train_dataset = ClassificationDataset(train_df, train_image_dir, transform=transform_train, use_generated=use_train_generated, base_dir=args.base_dir)
+    test_dataset = ClassificationDataset(test_df, test_image_dir, transform=transform_test, use_generated=False, base_dir=args.base_dir) # Always test on real
 
     # Compute sample weights (for each data point based on its class)
     class_weights = 1.0 / torch.tensor(class_counts, dtype=torch.float)
