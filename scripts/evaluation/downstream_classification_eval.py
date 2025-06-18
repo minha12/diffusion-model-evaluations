@@ -73,7 +73,7 @@ def get_model(model_name, num_classes, pretrained=True):
             num_ftrs = model.fc.in_features
             # Replace fc with a sequence that includes dropout
             model.fc = nn.Sequential(
-                nn.Dropout(0.5),  # Add dropout with 0.5 probability
+                nn.Dropout(0.3),  # Reduce from 0.5 to 0.3
                 nn.Linear(num_ftrs, num_classes)
             )
         elif hasattr(model, 'classifier'): # For VGG, DenseNet, etc.
@@ -87,13 +87,13 @@ def get_model(model_name, num_classes, pretrained=True):
                  # Insert dropout before the last layer
                  model.classifier = nn.Sequential(
                      *list(model.classifier[:last_layer_idx]),
-                     nn.Dropout(0.5),
+                     nn.Dropout(0.3),
                      nn.Linear(num_ftrs, num_classes)
                  )
              elif isinstance(model.classifier, nn.Linear): # Single classifier layer
                  num_ftrs = model.classifier.in_features
                  model.classifier = nn.Sequential(
-                     nn.Dropout(0.5),
+                     nn.Dropout(0.3),
                      nn.Linear(num_ftrs, num_classes)
                  )
         else:
