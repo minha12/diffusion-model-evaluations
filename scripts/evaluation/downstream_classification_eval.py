@@ -6,6 +6,7 @@ import yaml
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F  # Add this import
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torchvision import transforms
@@ -73,7 +74,7 @@ def get_model(model_name, num_classes, pretrained=True):
             num_ftrs = model.fc.in_features
             # Replace fc with a sequence that includes dropout
             model.fc = nn.Sequential(
-                nn.Dropout(0.3),  # Reduce from 0.5 to 0.3
+                nn.Dropout(0.1),  # Reduce from 0.5 to 0.3
                 nn.Linear(num_ftrs, num_classes)
             )
         elif hasattr(model, 'classifier'): # For VGG, DenseNet, etc.
@@ -87,13 +88,13 @@ def get_model(model_name, num_classes, pretrained=True):
                  # Insert dropout before the last layer
                  model.classifier = nn.Sequential(
                      *list(model.classifier[:last_layer_idx]),
-                     nn.Dropout(0.3),
+                     nn.Dropout(0.1),
                      nn.Linear(num_ftrs, num_classes)
                  )
              elif isinstance(model.classifier, nn.Linear): # Single classifier layer
                  num_ftrs = model.classifier.in_features
                  model.classifier = nn.Sequential(
-                     nn.Dropout(0.3),
+                     nn.Dropout(0.1),
                      nn.Linear(num_ftrs, num_classes)
                  )
         else:
@@ -228,6 +229,26 @@ def evaluate(model, dataloader, criterion, device, num_classes):
     return metrics
 
 
+# --- Focal Loss ---
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha  # Weight for each class
+        self.gamma = gamma  # Focusing parameter
+        self.reduction = reduction
+    
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none', weight=self.alpha)
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        return focal_loss
+
+
 # --- Main Function ---
 def main(args):
     class_counts = [float(x) for x in args.class_counts.split(',')]
@@ -321,11 +342,11 @@ def main(args):
     weights = class_weights.to(device)  # Reuse the same weights calculated earlier
 
     # Use weighted CrossEntropyLoss
-    criterion = nn.CrossEntropyLoss(weight=weights)
+    criterion = FocalLoss(alpha=weights, gamma=2.0)
 
     optimizer = optim.Adam(model.parameters(), 
                       lr=cls_config['learning_rate'], 
-                      weight_decay=0.0005)  # Reduce from 0.001 to 0.0005
+                      weight_decay=0.0001)  # Reduce from 0.001 to 0.0005
 
     # --- Learning Rate Scheduler ---
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
