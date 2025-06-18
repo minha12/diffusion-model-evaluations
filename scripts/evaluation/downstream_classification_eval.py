@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torchvision import transforms
 from torchvision import models as torchvision_models
 from PIL import Image
@@ -136,6 +136,11 @@ def evaluate(model, dataloader, criterion, device, num_classes):
     f1_metric = torchmetrics.F1Score(task="multiclass", num_classes=num_classes, average='macro').to(device)
     auc_metric = torchmetrics.AUROC(task="multiclass", num_classes=num_classes).to(device) if num_classes > 1 else None # AUROC needs >1 class
 
+    # Add per-class metrics
+    per_class_precision = torchmetrics.Precision(task="multiclass", num_classes=num_classes, average=None).to(device)
+    per_class_recall = torchmetrics.Recall(task="multiclass", num_classes=num_classes, average=None).to(device)
+    per_class_f1 = torchmetrics.F1Score(task="multiclass", num_classes=num_classes, average=None).to(device)
+
 
     with torch.no_grad():
         for inputs, labels in tqdm(dataloader, desc="Evaluating", leave=False):
@@ -161,6 +166,11 @@ def evaluate(model, dataloader, criterion, device, num_classes):
             if auc_metric:
                  auc_metric.update(probs, labels) # AUROC needs probabilities
 
+            # Update per-class metrics
+            per_class_precision.update(preds, labels)
+            per_class_recall.update(preds, labels)
+            per_class_f1.update(preds, labels)
+
             # Store for sklearn metrics if needed (optional, as torchmetrics is preferred)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
@@ -176,6 +186,10 @@ def evaluate(model, dataloader, criterion, device, num_classes):
     final_f1 = f1_metric.compute().item()
     final_auc = auc_metric.compute().item() if auc_metric else 0.0 # Handle binary case or if AUC fails
 
+    # Compute per-class metrics
+    per_class_precision_values = per_class_precision.compute().cpu().numpy()
+    per_class_recall_values = per_class_recall.compute().cpu().numpy()
+    per_class_f1_values = per_class_f1.compute().cpu().numpy()
 
     metrics = {
         "loss": eval_loss,
@@ -183,7 +197,10 @@ def evaluate(model, dataloader, criterion, device, num_classes):
         "precision": final_precision,
         "recall": final_recall,
         "f1_score": final_f1,
-        "auc": final_auc
+        "auc": final_auc,
+        "per_class_precision": per_class_precision_values.tolist(),
+        "per_class_recall": per_class_recall_values.tolist(),
+        "per_class_f1": per_class_f1_values.tolist(),
     }
 
     # Reset metrics for next evaluation
@@ -192,12 +209,16 @@ def evaluate(model, dataloader, criterion, device, num_classes):
     recall_metric.reset()
     f1_metric.reset()
     if auc_metric: auc_metric.reset()
+    per_class_precision.reset()
+    per_class_recall.reset()
+    per_class_f1.reset()
 
     return metrics
 
 
 # --- Main Function ---
 def main(args):
+    class_counts = [float(x) for x in args.class_counts.split(',')]
     config = load_config(args.config_path)
     cls_config = config['downstream_tasks']['classification']
     num_classes = cls_config['num_classes']
@@ -210,7 +231,9 @@ def main(args):
     # Define base directory for resolving relative paths
     base_dir = Path(args.base_dir)
 
-
+    # Print class distribution information
+    print(f"Using class distribution: {class_counts}")
+    
     # Determine train/test data based on mode
     if args.mode == "baseline":
         # Train on real train split, test on real test split
@@ -243,6 +266,14 @@ def main(args):
     train_dataset = ClassificationDataset(train_df, train_image_dir, transform=transform, use_generated=use_train_generated, base_dir=args.base_dir)
     test_dataset = ClassificationDataset(test_df, test_image_dir, transform=transform, use_generated=False, base_dir=args.base_dir) # Always test on real
 
+    # Compute sample weights (for each data point based on its class)
+    class_weights = 1.0 / torch.tensor(class_counts, dtype=torch.float)
+    class_weights = class_weights / class_weights.sum()  # Normalize weights
+    print(f"Class weights: {class_weights}")
+    
+    sample_weights = [class_weights[label] for label in train_df['classification_label']]
+    sampler = WeightedRandomSampler(sample_weights, len(sample_weights))
+
     # Create dataloaders
     # Handle potential None items from dataset loading errors
     def collate_fn(batch):
@@ -250,13 +281,30 @@ def main(args):
         if not batch: return torch.Tensor(), torch.Tensor() # Return empty tensors if batch is empty
         return torch.utils.data.dataloader.default_collate(batch)
 
-    train_loader = DataLoader(train_dataset, batch_size=cls_config['batch_size'], shuffle=True, num_workers=4, collate_fn=collate_fn)
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=cls_config['batch_size'], 
+        sampler=sampler,  # Use sampler instead of shuffle
+        num_workers=4, 
+        collate_fn=collate_fn
+    )
     test_loader = DataLoader(test_dataset, batch_size=cls_config['batch_size'], shuffle=False, num_workers=4, collate_fn=collate_fn)
 
     # --- Model Initialization ---
     model = get_model(cls_config['model'], num_classes).to(device)
-    criterion = nn.CrossEntropyLoss()
+
+    # Calculate weights inversely proportional to class frequencies
+    weights = class_weights.to(device)  # Reuse the same weights calculated earlier
+
+    # Use weighted CrossEntropyLoss
+    criterion = nn.CrossEntropyLoss(weight=weights)
+
     optimizer = optim.Adam(model.parameters(), lr=cls_config['learning_rate'])
+
+    # --- Learning Rate Scheduler ---
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='max', factor=0.5, patience=2, verbose=True
+    )
 
     # --- Training Loop ---
     print("Starting training...")
@@ -264,13 +312,20 @@ def main(args):
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         print(f"Epoch {epoch+1}/{cls_config['num_epochs']} - Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
 
+        # --- Learning Rate Scheduling ---
+        val_metrics = evaluate(model, test_loader, criterion, device, num_classes)
+        scheduler.step(val_metrics['f1_score'])  # Use F1 score for LR scheduling
+
     # --- Final Evaluation ---
     print("Starting final evaluation on test set...")
     test_metrics = evaluate(model, test_loader, criterion, device, num_classes)
     print("-" * 30)
     print("Test Set Evaluation Results:")
     for key, value in test_metrics.items():
-        print(f"{key.capitalize()}: {value:.4f}")
+        if isinstance(value, list):
+            print(f"{key.capitalize()}: {value}")
+        else:
+            print(f"{key.capitalize()}: {value:.4f}")
     print("-" * 30)
 
     # --- Save Results ---
@@ -296,6 +351,8 @@ if __name__ == "__main__":
     parser.add_argument("--generated-images-dir", help="Directory containing generated images (required if mode='generated'). Relative to base_dir.")
     parser.add_argument("--base-dir", default=".", help="Project base directory for resolving relative paths.")
     parser.add_argument("--save-model", action="store_true", help="Save the trained model.")
+    parser.add_argument("--class-counts", default="19.49,7.49,73.02", 
+                      help="Comma-separated class distribution percentages (default: 19.49,7.49,73.02)")
 
     args = parser.parse_args()
 

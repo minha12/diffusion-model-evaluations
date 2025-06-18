@@ -11,7 +11,7 @@ MODELS_DIR = "models"
 RESULTS_DIR = f"results/{DATASET}"
 DATA_DIR = f"data/{DATASET}"
 GROUND_TRUTH_DIR = f"{DATA_DIR}/patches"
-PLAIN_SEGMENTATION_DIR = f"{DATA_DIR}/plain-segmentation" # Use plain segmentation
+PLAIN_SEGMENTATION_DIR = f"{DATA_DIR}/plain-segmentation-clean-5-cls" # Use plain segmentation
 GENERATED_IMAGES_DIR_TPL = f"{RESULTS_DIR}/generated_images/{{model}}" # Template
 METRICS_DIR_TPL = f"{RESULTS_DIR}/metrics/{{model}}" # Template
 DOWNSTREAM_DATA_DIR = f"{RESULTS_DIR}/downstream_data" # Metadata storage
@@ -49,12 +49,15 @@ rule prepare_dataset:
         main_dir=directory(DATA_DIR),
         seg_dir=directory(f"{DATA_DIR}/segmentation"),
         patches_dir=directory(f"{DATA_DIR}/patches"),
-        plain_seg_dir=directory(PLAIN_SEGMENTATION_DIR),
+        plain_seg_dir=directory(f"{DATA_DIR}/plain-segmentation"),
         prompts=f"{DATA_DIR}/prompts/prompts.txt"
     params:
         source_dir=config["data_sources"][DATASET]["path"],
         num_samples=config["dataset_preparation"]["num_samples"],
-        seed=config["dataset_preparation"]["seed"]
+        seed=config["dataset_preparation"]["seed"],
+        # Extract directory names using os.path.basename
+        segmentation_subdir=os.path.basename(f"{DATA_DIR}/segmentation"),
+        plain_segmentation_subdir=os.path.basename(PLAIN_SEGMENTATION_DIR)
     conda: config["conda_envs"]["default"]
     shell:
         """
@@ -62,7 +65,9 @@ rule prepare_dataset:
             --source_dir {params.source_dir} \
             --target_dir {output.main_dir} \
             --num_samples {params.num_samples} \
-            --seed {params.seed}
+            --seed {params.seed} \
+            --segmentation_subdir {params.segmentation_subdir} \
+            --plain_segmentation_subdir {params.plain_segmentation_subdir}
         """
 # --- Inference ---
 # Rule to run inference for all models (preserved from original)
