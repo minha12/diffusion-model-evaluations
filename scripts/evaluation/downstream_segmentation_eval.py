@@ -12,84 +12,103 @@ import numpy as np
 from tqdm import tqdm
 import json
 from pathlib import Path
-import torchmetrics # Use torchmetrics
+import torchmetrics
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
+import matplotlib.pyplot as plt
+from collections import defaultdict
+import warnings
 
 # --- Import segmentation_models_pytorch ---
 import segmentation_models_pytorch as smp
-from segmentation_models_pytorch import losses as smp_losses  # Import SMP losses
+from segmentation_models_pytorch import losses as smp_losses
 
 # --- Configuration ---
 def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-# --- Augmentation Functions ---
+# --- Enhanced Augmentation Functions ---
 def get_training_augmentation(img_size, encoder_name=None):
-    # Get encoder-specific preprocessing parameters if encoder_name is provided
-    if (encoder_name):
+    """Enhanced training augmentations with better medical image support"""
+    if encoder_name:
         try:
             params = smp.encoders.get_preprocessing_params(encoder_name)
             mean = params.get('mean', (0.485, 0.456, 0.406))
             std = params.get('std', (0.229, 0.224, 0.225))
         except:
-            # Fallback to default mean and std if encoder not found
             mean = (0.485, 0.456, 0.406)
             std = (0.229, 0.224, 0.225)
     else:
-        # Default ImageNet mean and std
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
     
     train_transform = [
-        A.Resize(height=img_size[0], width=img_size[1]), # Resize first
+        A.Resize(height=img_size[0], width=img_size[1]),
+        
+        # Geometric transformations
         A.HorizontalFlip(p=0.5),
-        A.ShiftScaleRotate(scale_limit=0.1, rotate_limit=15, shift_limit=0.1, p=0.5, border_mode=0),
-        A.GaussNoise(p=0.2),
-        A.OneOf(
-            [
-                A.CLAHE(p=1),
-                A.RandomBrightnessContrast(p=1),
-                A.RandomGamma(p=1),
-            ],
-            p=0.9,
+        A.VerticalFlip(p=0.3),  # Added vertical flip
+        A.RandomRotate90(p=0.3),  # Added 90-degree rotations
+        A.Transpose(p=0.3),  # Added transpose
+        A.Affine(
+            scale=(0.9, 1.1),
+            translate_percent=(-0.1, 0.1),
+            rotate=(-15, 15),
+            shear=(-5, 5),
+            p=0.5,
+            mode=0
         ),
-        A.OneOf(
-            [
-                A.Sharpen(p=1),
-                A.Blur(blur_limit=3, p=1),
-                A.MotionBlur(blur_limit=3, p=1),
-            ],
-            p=0.9,
+        
+        # Intensity transformations
+        A.OneOf([
+            A.CLAHE(clip_limit=2.0, p=1),
+            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=1),
+            A.RandomGamma(gamma_limit=(80, 120), p=1),
+        ], p=0.8),
+        
+        # Noise and blur
+        A.OneOf([
+            A.GaussNoise(var_limit=(10, 50), p=1),
+            A.MultiplicativeNoise(multiplier=[0.9, 1.1], p=1),
+        ], p=0.3),
+        
+        A.OneOf([
+            A.Blur(blur_limit=3, p=1),
+            A.MotionBlur(blur_limit=3, p=1),
+            A.MedianBlur(blur_limit=3, p=1),
+        ], p=0.3),
+        
+        # Color augmentations (lighter for medical images)
+        A.HueSaturationValue(
+            hue_shift_limit=10,
+            sat_shift_limit=15,
+            val_shift_limit=10,
+            p=0.3
         ),
-        A.OneOf(
-            [
-                A.RandomBrightnessContrast(p=1),
-                A.HueSaturationValue(p=1),
-            ],
-            p=0.9,
-        ),
-        # Use encoder-specific normalization
+        
+        # Grid distortion for better boundary learning
+        A.OneOf([
+            A.GridDistortion(num_steps=5, distort_limit=0.1, p=1),
+            A.ElasticTransform(alpha=1, sigma=50, p=1),
+        ], p=0.2),
+        
         A.Normalize(mean=mean, std=std),
         ToTensorV2(),
     ]
     return A.Compose(train_transform)
 
 def get_validation_testing_augmentation(img_size, encoder_name=None):
-    """Only Resize, Normalize, and Convert to Tensor for validation/testing."""
-    # Get encoder-specific preprocessing parameters if encoder_name is provided
-    if (encoder_name):
+    """Clean validation/testing augmentations"""
+    if encoder_name:
         try:
             params = smp.encoders.get_preprocessing_params(encoder_name)
             mean = params.get('mean', (0.485, 0.456, 0.406))
             std = params.get('std', (0.229, 0.224, 0.225))
         except:
-            # Fallback to default mean and std if encoder not found
             mean = (0.485, 0.456, 0.406)
             std = (0.229, 0.224, 0.225)
     else:
-        # Default ImageNet mean and std
         mean = (0.485, 0.456, 0.406)
         std = (0.229, 0.224, 0.225)
         
@@ -100,185 +119,342 @@ def get_validation_testing_augmentation(img_size, encoder_name=None):
     ]
     return A.Compose(test_transform)
 
-# --- Dataset ---
+# --- Enhanced Dataset with better error handling ---
 class SegmentationDataset(Dataset):
     def __init__(self, metadata_df, image_dir, mask_dir, augmentation=None, use_generated=False, generated_suffix=".png", base_dir="."):
         self.metadata = metadata_df
-        self.image_dir = Path(base_dir) / image_dir if image_dir else None # Allow empty image_dir for real data paths in metadata
-        self.mask_dir = Path(base_dir) / mask_dir if mask_dir else None # Masks always come from real data path in metadata
+        self.image_dir = Path(base_dir) / image_dir if image_dir else None
+        self.mask_dir = Path(base_dir) / mask_dir if mask_dir else None
         self.augmentation = augmentation
         self.use_generated = use_generated
         self.generated_suffix = generated_suffix
         self.base_dir = Path(base_dir)
+        
+        # Pre-validate dataset
+        self.valid_indices = self._validate_dataset()
+        print(f"Dataset initialized with {len(self.valid_indices)}/{len(self.metadata)} valid samples")
+
+    def _validate_dataset(self):
+        """Pre-validate all samples to avoid runtime errors"""
+        valid_indices = []
+        for idx in range(len(self.metadata)):
+            row = self.metadata.iloc[idx]
+            image_id = row['image_id']
+            
+            # Get paths
+            if self.use_generated and self.image_dir:
+                img_path = self.image_dir / f"{image_id}{self.generated_suffix}"
+            else:
+                img_path_relative = row['real_image_path']
+                img_path = self.base_dir / img_path_relative
+            
+            mask_path_relative = row['real_mask_path']
+            mask_path = self.base_dir / mask_path_relative
+            
+            if img_path.exists() and mask_path.exists():
+                valid_indices.append(idx)
+        
+        return valid_indices
 
     def __len__(self):
-        return len(self.metadata)
+        return len(self.valid_indices)
 
     def __getitem__(self, idx):
-        row = self.metadata.iloc[idx]
+        actual_idx = self.valid_indices[idx]
+        row = self.metadata.iloc[actual_idx]
         image_id = row['image_id']
 
-        # --- Get Image Path ---
+        # Get paths
         if self.use_generated and self.image_dir:
             img_path = self.image_dir / f"{image_id}{self.generated_suffix}"
         else:
             img_path_relative = row['real_image_path']
             img_path = self.base_dir / img_path_relative
 
-        # --- Get Mask Path ---
-        mask_path_relative = row['real_mask_path'] # Always use real mask path from metadata
+        mask_path_relative = row['real_mask_path']
         mask_path = self.base_dir / mask_path_relative
 
-        if not img_path.exists():
-             print(f"Warning: Image not found at {img_path}. Skipping.")
-             return None, None
-        if not mask_path.exists():
-             print(f"Warning: Mask not found at {mask_path}. Skipping.")
-             return None, None
-
         try:
-            # Load image using PIL
+            # Load and process image
             image = Image.open(str(img_path)).convert('RGB')
-            image = np.array(image)  # Convert to numpy array for albumentations
-
-            # Load mask using PIL
-            mask = Image.open(str(mask_path)).convert('L')  # Convert to grayscale
-            mask = np.array(mask)  # Convert to numpy array for albumentations
+            image = np.array(image)
+            
+            # Load and process mask
+            mask = Image.open(str(mask_path)).convert('L')
+            mask = np.array(mask)
+            
+            # Ensure mask values are in valid range
+            mask = np.clip(mask, 0, 4)  # Assuming 5 classes (0-4)
 
             # Apply augmentations
             if self.augmentation:
                 transformed = self.augmentation(image=image, mask=mask)
-                image = transformed['image']  # Now a Tensor (CxHxW)
-                mask = transformed['mask']    # Still HxW but as tensor
+                image = transformed['image']
+                mask = transformed['mask']
             
-            # Ensure mask is LongTensor 
+            # Ensure mask is LongTensor
             if isinstance(mask, torch.Tensor):
                 mask = mask.long()
             else:
                 mask = torch.from_numpy(mask).long()
+                
+            return image, mask
 
         except Exception as e:
-            print(f"Error loading/transforming image/mask pair {image_id}: {e}")
-            return None, None
+            print(f"Error loading image/mask pair {image_id}: {e}")
+            # Return a dummy sample to maintain batch consistency
+            dummy_image = torch.zeros(3, 256, 256)
+            dummy_mask = torch.zeros(256, 256, dtype=torch.long)
+            return dummy_image, dummy_mask
 
-        return image, mask
-
-# --- Model ---
+# --- Enhanced Model with better architectures ---
 def get_segmentation_model(model_name, encoder, num_classes, pretrained='imagenet'):
-    if model_name.lower() == 'unet':
+    """Get segmentation model with enhanced options"""
+    model_name = model_name.lower()
+    
+    if model_name == 'unet':
         model = smp.Unet(
             encoder_name=encoder,
             encoder_weights=pretrained,
             in_channels=3,
             classes=num_classes,
+            activation=None,  # We'll handle activation in loss
         )
-        print(f"Using segmentation_models_pytorch U-Net with encoder: {encoder}")
-    elif model_name.lower() == 'fpn':
+    elif model_name == 'unetplusplus':
+        model = smp.UnetPlusPlus(
+            encoder_name=encoder,
+            encoder_weights=pretrained,
+            in_channels=3,
+            classes=num_classes,
+            activation=None,
+        )
+    elif model_name == 'fpn':
         model = smp.FPN(
             encoder_name=encoder,
             encoder_weights=pretrained,
             in_channels=3,
             classes=num_classes,
+            activation=None,
         )
-        print(f"Using segmentation_models_pytorch FPN with encoder: {encoder}")
+    elif model_name == 'deeplabv3plus':
+        model = smp.DeepLabV3Plus(
+            encoder_name=encoder,
+            encoder_weights=pretrained,
+            in_channels=3,
+            classes=num_classes,
+            activation=None,
+        )
     else:
         raise ValueError(f"Segmentation model {model_name} not supported.")
+    
+    print(f"Using {model_name.upper()} with encoder: {encoder}")
     return model
 
-# --- Training ---
+# --- Enhanced Loss Function ---
+class CombinedLoss(nn.Module):
+    """Combined loss for better segmentation performance"""
+    def __init__(self, num_classes, alpha=0.7, beta=0.3, class_weights=None):
+        super().__init__()
+        self.dice_loss = smp_losses.DiceLoss(mode='multiclass', from_logits=True)
+        self.ce_loss = nn.CrossEntropyLoss(weight=class_weights)
+        self.alpha = alpha
+        self.beta = beta
+        
+    def forward(self, logits, targets):
+        dice = self.dice_loss(logits, targets)
+        ce = self.ce_loss(logits, targets)
+        return self.alpha * dice + self.beta * ce
+
+# --- Enhanced Training with Validation ---
 def train_epoch(model, dataloader, criterion, optimizer, device, scheduler=None):
     model.train()
     running_loss = 0.0
+    processed_samples = 0
 
     for images, masks in tqdm(dataloader, desc="Training", leave=False):
-         # Filter out None items caused by loading errors
-        valid_indices = [i for i, (img, msk) in enumerate(zip(images, masks)) if img is not None]
-        if not valid_indices:
-            continue
-
-        images = torch.stack([images[i] for i in valid_indices]).to(device)
-        masks = torch.stack([masks[i] for i in valid_indices]).to(device) # Masks should be LongTensor (H, W)
-
+        images, masks = images.to(device), masks.to(device)
+        
         optimizer.zero_grad()
-        outputs = model(images) # Shape: (B, C, H, W)
-        loss = criterion(outputs, masks) # DiceLoss expects (B, C, H, W) and (B, H, W)
+        outputs = model(images)
+        loss = criterion(outputs, masks)
         loss.backward()
+        
+        # Gradient clipping for stability
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
         optimizer.step()
         
-        # Step the scheduler if provided (for step-based schedulers)
         if scheduler is not None:
             scheduler.step()
 
         running_loss += loss.item() * images.size(0)
+        processed_samples += images.size(0)
 
-    epoch_loss = running_loss / len(dataloader.dataset) # Adjust divisor if dataset contains None
+    epoch_loss = running_loss / processed_samples
     return epoch_loss
 
-# --- Evaluation ---
-def evaluate(model, dataloader, criterion, device, num_classes):
+def validate_epoch(model, dataloader, criterion, device, num_classes):
+    """Validation during training"""
     model.eval()
     running_loss = 0.0
-
-    # Use torchmetrics for Pixel Accuracy only
-    accuracy_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, average='macro').to(device) # Pixel Accuracy
+    processed_samples = 0
     
-    # For IoU, we'll use SMP's implementation like in the tutorial
-    # Initialize tp, fp, fn, tn accumulators
-    tp_sum = 0
-    fp_sum = 0
-    fn_sum = 0
-    tn_sum = 0
+    # Metrics
+    accuracy_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, average='macro').to(device)
+    tp_sum = fp_sum = fn_sum = tn_sum = 0
 
     with torch.no_grad():
-        for images, masks in tqdm(dataloader, desc="Evaluating", leave=False):
-            # Filter out None items
-            valid_indices = [i for i, (img, msk) in enumerate(zip(images, masks)) if img is not None]
-            if not valid_indices:
-                 continue
-
-            images = torch.stack([images[i] for i in valid_indices]).to(device)
-            masks = torch.stack([masks[i] for i in valid_indices]).to(device)
-
-            outputs = model(images) # (B, C, H, W)
-            loss = criterion(outputs, masks) # (B, H, W)
+        for images, masks in tqdm(dataloader, desc="Validating", leave=False):
+            images, masks = images.to(device), masks.to(device)
+            
+            outputs = model(images)
+            loss = criterion(outputs, masks)
             running_loss += loss.item() * images.size(0)
+            processed_samples += images.size(0)
 
-            preds = torch.argmax(outputs, dim=1) # (B, H, W)
-
-            # Update accuracy metric
+            preds = torch.argmax(outputs, dim=1)
             accuracy_metric.update(preds, masks)
             
-            # Compute TP, FP, FN, TN using SMP's implementation
+            # IoU computation
             tp, fp, fn, tn = smp.metrics.get_stats(
-                preds, 
-                masks, 
-                mode='multiclass', 
-                num_classes=num_classes
+                preds, masks, mode='multiclass', num_classes=num_classes
             )
-            
-            # Accumulate metrics
             tp_sum += tp
             fp_sum += fp
             fn_sum += fn
             tn_sum += tn
 
-    eval_loss = running_loss / len(dataloader.dataset) # Adjust divisor if dataset contains None
+    val_loss = running_loss / processed_samples
+    val_accuracy = accuracy_metric.compute().item()
+    val_miou = smp.metrics.iou_score(tp_sum, fp_sum, fn_sum, tn_sum, reduction="micro").item()
+    
+    accuracy_metric.reset()
+    
+    return {
+        "loss": val_loss,
+        "accuracy": val_accuracy,
+        "miou": val_miou
+    }
 
-    # Compute final metrics
-    # Calculate IoU using SMP's implementation (same as in the tutorial)
+# --- Enhanced Evaluation ---
+def evaluate(model, dataloader, criterion, device, num_classes):
+    model.eval()
+    running_loss = 0.0
+    processed_samples = 0
+
+    # Metrics
+    accuracy_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, average='macro').to(device)
+    tp_sum = fp_sum = fn_sum = tn_sum = 0
+
+    with torch.no_grad():
+        for images, masks in tqdm(dataloader, desc="Evaluating", leave=False):
+            images, masks = images.to(device), masks.to(device)
+
+            outputs = model(images)
+            loss = criterion(outputs, masks)
+            running_loss += loss.item() * images.size(0)
+            processed_samples += images.size(0)
+
+            preds = torch.argmax(outputs, dim=1)
+            accuracy_metric.update(preds, masks)
+            
+            tp, fp, fn, tn = smp.metrics.get_stats(
+                preds, masks, mode='multiclass', num_classes=num_classes
+            )
+            tp_sum += tp
+            fp_sum += fp
+            fn_sum += fn
+            tn_sum += tn
+
+    eval_loss = running_loss / processed_samples
     final_miou = smp.metrics.iou_score(tp_sum, fp_sum, fn_sum, tn_sum, reduction="micro").item()
     final_accuracy = accuracy_metric.compute().item()
 
+    # Per-class IoU
+    per_class_iou = smp.metrics.iou_score(tp_sum, fp_sum, fn_sum, tn_sum, reduction=None)
+    
     metrics = {
         "loss": eval_loss,
         "mean_iou": final_miou,
         "pixel_accuracy": final_accuracy,
+        "per_class_iou": per_class_iou.tolist() if torch.is_tensor(per_class_iou) else per_class_iou
     }
 
-    # Reset metrics
     accuracy_metric.reset()
-
     return metrics
+
+# --- Early Stopping ---
+class EarlyStopping:
+    def __init__(self, patience=7, min_delta=0.001, restore_best_weights=True):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.restore_best_weights = restore_best_weights
+        self.best_loss = None
+        self.counter = 0
+        self.best_weights = None
+
+    def __call__(self, val_loss, model):
+        if self.best_loss is None:
+            self.best_loss = val_loss
+            self.save_checkpoint(model)
+        elif val_loss < self.best_loss - self.min_delta:
+            self.best_loss = val_loss
+            self.counter = 0
+            self.save_checkpoint(model)
+        else:
+            self.counter += 1
+
+        if self.counter >= self.patience:
+            if self.restore_best_weights:
+                model.load_state_dict(self.best_weights)
+            return True
+        return False
+
+    def save_checkpoint(self, model):
+        self.best_weights = model.state_dict().copy()
+
+# --- Training History Visualization ---
+def plot_training_history(history, output_dir):
+    """Plot training history"""
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    
+    # Loss
+    axes[0, 0].plot(history['train_loss'], label='Train Loss')
+    axes[0, 0].plot(history['val_loss'], label='Validation Loss')
+    axes[0, 0].set_title('Training and Validation Loss')
+    axes[0, 0].set_xlabel('Epoch')
+    axes[0, 0].set_ylabel('Loss')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True)
+    
+    # Accuracy
+    axes[0, 1].plot(history['val_accuracy'], label='Validation Accuracy')
+    axes[0, 1].set_title('Validation Accuracy')
+    axes[0, 1].set_xlabel('Epoch')
+    axes[0, 1].set_ylabel('Accuracy')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True)
+    
+    # IoU
+    axes[1, 0].plot(history['val_miou'], label='Validation mIoU')
+    axes[1, 0].set_title('Validation Mean IoU')
+    axes[1, 0].set_xlabel('Epoch')
+    axes[1, 0].set_ylabel('mIoU')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True)
+    
+    # Learning Rate
+    axes[1, 1].plot(history['learning_rate'], label='Learning Rate')
+    axes[1, 1].set_title('Learning Rate Schedule')
+    axes[1, 1].set_xlabel('Epoch')
+    axes[1, 1].set_ylabel('Learning Rate')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True)
+    axes[1, 1].set_yscale('log')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'training_history.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
 # --- Main Function ---
 def main(args):
@@ -290,132 +466,190 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # --- Data Loading ---
+    # Data Loading
     metadata_df = pd.read_csv(args.metadata_path)
     base_dir = Path(args.base_dir)
 
+    # Split validation from training data
     if args.mode == "baseline":
         train_df = metadata_df[metadata_df['split'] == 'train']
+        # Create validation split (20% of training data)
+        val_size = int(0.2 * len(train_df))
+        val_df = train_df.sample(n=val_size, random_state=42)
+        train_df = train_df.drop(val_df.index)
+        
         test_df = metadata_df[metadata_df['split'] == 'test']
-        train_image_dir = "" # Use paths from metadata
-        test_image_dir = ""  # Use paths from metadata
-        use_train_generated = False
-        print(f"Running Baseline: Training on {len(train_df)} real samples, Testing on {len(test_df)} real samples.")
+        train_image_dir = test_image_dir = val_image_dir = ""
+        use_train_generated = use_val_generated = False
+        
+        print(f"Baseline: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
+        
     elif args.mode == "generated":
-        train_df = metadata_df # Use all real samples for training mapping
+        all_data = metadata_df
+        val_size = int(0.2 * len(all_data))
+        val_df = all_data.sample(n=val_size, random_state=42)
+        train_df = all_data.drop(val_df.index)
+        
         test_df = metadata_df[metadata_df['split'] == 'test']
-        train_image_dir = args.generated_images_dir # Relative path
-        test_image_dir = "" # Use paths from metadata
-        use_train_generated = True
-        print(f"Running Generated Eval: Training on {len(train_df)} generated samples, Testing on {len(test_df)} real samples.")
+        train_image_dir = val_image_dir = args.generated_images_dir
+        test_image_dir = ""
+        use_train_generated = use_val_generated = True
+        
+        print(f"Generated: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
     else:
         raise ValueError("Mode must be 'baseline' or 'generated'")
 
-    # Define image size and get augmentations
+    # Enhanced augmentations
     img_size = tuple(config.get('image_size', [256, 256]))
-    
-    # Create separate augmentation pipelines with encoder-specific normalization
     train_augmentation = get_training_augmentation(img_size, encoder_name)
     eval_augmentation = get_validation_testing_augmentation(img_size, encoder_name)
 
-    # Create datasets with proper augmentations
+    # Create datasets
     train_dataset = SegmentationDataset(
-        train_df, 
-        train_image_dir, 
-        mask_dir="", 
-        augmentation=train_augmentation, 
-        use_generated=use_train_generated, 
-        base_dir=args.base_dir
+        train_df, train_image_dir, "", train_augmentation, 
+        use_train_generated, base_dir=args.base_dir
     )
-    
+    val_dataset = SegmentationDataset(
+        val_df, val_image_dir, "", eval_augmentation, 
+        use_val_generated, base_dir=args.base_dir
+    )
     test_dataset = SegmentationDataset(
-        test_df, 
-        test_image_dir, 
-        mask_dir="", 
-        augmentation=eval_augmentation, 
-        use_generated=False, 
-        base_dir=args.base_dir
+        test_df, test_image_dir, "", eval_augmentation, 
+        False, base_dir=args.base_dir
     )
 
-    # Collate function to handle loading errors
-    def collate_fn(batch):
-        batch = list(filter(lambda x: x is not None and x[0] is not None and x[1] is not None, batch))
-        if not batch: return torch.Tensor(), torch.Tensor()
-        return torch.utils.data.dataloader.default_collate(batch)
+    # Data loaders
+    batch_size = seg_config.get('batch_size', 8)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
 
-    # May need to lower batch size for more complex architecture
-    batch_size = seg_config.get('batch_size', 8)  # Default to smaller batch size
-    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=collate_fn)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=collate_fn)
-
-    # --- Model Initialization ---
+    # Enhanced model
     model = get_segmentation_model(
         model_name=seg_config['model'],
         encoder=encoder_name,
         num_classes=num_classes
     ).to(device)
     
-    # Use segmentation-specific DiceLoss instead of CrossEntropyLoss
-    criterion = smp_losses.DiceLoss(mode='multiclass', from_logits=True)
+    # Enhanced loss function
+    criterion = CombinedLoss(num_classes=num_classes)
     
-    # Optionally use a combined loss function for better results
-    # criterion = smp_losses.DiceLoss(mode='multiclass', from_logits=True) + 0.5 * nn.CrossEntropyLoss()
+    # Enhanced optimizer and scheduler
+    optimizer = optim.AdamW(
+        model.parameters(), 
+        lr=seg_config['learning_rate'],
+        weight_decay=1e-4
+    )
     
-    optimizer = optim.Adam(model.parameters(), lr=seg_config['learning_rate'])
-    
-    # Add learning rate scheduler
-    # T_max is set to total steps (epochs * batches_per_epoch)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    # More conservative learning rate scheduling
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, 
-        T_max=seg_config['num_epochs'] * len(train_loader), 
+        T_0=5,  # Restart every 5 epochs
+        T_mult=2,  # Double the restart interval
         eta_min=1e-6
     )
-
-    # --- Training Loop ---
-    print("Starting training...")
+    
+    # Early stopping
+    early_stopping = EarlyStopping(patience=10, min_delta=0.001)
+    
+    # Training history
+    history = defaultdict(list)
+    
+    # Training loop with validation
+    print("Starting enhanced training...")
+    best_val_miou = 0.0
+    
     for epoch in range(seg_config['num_epochs']):
-        train_loss = train_epoch(model, train_loader, criterion, optimizer, device, scheduler)
+        # Training
+        train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
+        
+        # Validation
+        val_metrics = validate_epoch(model, val_loader, criterion, device, num_classes)
+        
+        # Scheduler step
+        scheduler.step()
+        
+        # Record history
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_metrics['loss'])
+        history['val_accuracy'].append(val_metrics['accuracy'])
+        history['val_miou'].append(val_metrics['miou'])
+        history['learning_rate'].append(optimizer.param_groups[0]['lr'])
+        
+        # Print progress
         current_lr = optimizer.param_groups[0]['lr']
-        print(f"Epoch {epoch+1}/{seg_config['num_epochs']} - Train Loss: {train_loss:.4f} - LR: {current_lr:.6f}")
-        # Optional: Add validation loop here if desired
-
-    # --- Final Evaluation ---
-    print("Starting final evaluation on test set...")
-    test_metrics = evaluate(model, test_loader, criterion, device, num_classes)
-    print("-" * 30)
-    print("Test Set Evaluation Results:")
-    for key, value in test_metrics.items():
-        print(f"{key.replace('_', ' ').capitalize()}: {value:.4f}")
-    print("-" * 30)
-
-    # --- Save Results ---
+        print(f"Epoch {epoch+1}/{seg_config['num_epochs']} - "
+              f"Train Loss: {train_loss:.4f} - "
+              f"Val Loss: {val_metrics['loss']:.4f} - "
+              f"Val mIoU: {val_metrics['miou']:.4f} - "
+              f"Val Acc: {val_metrics['accuracy']:.4f} - "
+              f"LR: {current_lr:.6f}")
+        
+        # Save best model
+        if val_metrics['miou'] > best_val_miou:
+            best_val_miou = val_metrics['miou']
+            if args.save_model:
+                os.makedirs(args.output_dir, exist_ok=True)
+                best_model_path = os.path.join(args.output_dir, f"best_{args.mode}_model.pth")
+                torch.save(model.state_dict(), best_model_path)
+        
+        # Early stopping
+        if early_stopping(val_metrics['loss'], model):
+            print(f"Early stopping triggered at epoch {epoch+1}")
+            break
+    
+    # Plot training history
     os.makedirs(args.output_dir, exist_ok=True)
+    plot_training_history(history, args.output_dir)
+    
+    # Final evaluation
+    print("Starting final evaluation...")
+    test_metrics = evaluate(model, test_loader, criterion, device, num_classes)
+    
+    print("-" * 50)
+    print("FINAL TEST RESULTS:")
+    print(f"Loss: {test_metrics['loss']:.4f}")
+    print(f"Mean IoU: {test_metrics['mean_iou']:.4f}")
+    print(f"Pixel Accuracy: {test_metrics['pixel_accuracy']:.4f}")
+    print("Per-class IoU:")
+    class_names = seg_config.get('class_names', [f"Class {i}" for i in range(num_classes)])
+    for i, (name, iou_value) in enumerate(zip(class_names, test_metrics['per_class_iou'])):
+        # Check if the IoU value is a list and extract the value if needed
+        if isinstance(iou_value, list):
+            if len(iou_value) > 0:
+                iou_value = iou_value[0]  # Extract first value if it's a list
+            else:
+                iou_value = 0.0  # Default if empty list
+        # Now format as float
+        print(f"  {name}: {float(iou_value):.4f}")
+    print("-" * 50)
+
+    # Save results
+    results = {
+        'test_metrics': test_metrics,
+        'training_history': dict(history),
+        'best_val_miou': best_val_miou,
+        'config': seg_config
+    }
+    
     results_path = os.path.join(args.output_dir, "segmentation_results.json")
     with open(results_path, 'w') as f:
-        json.dump(test_metrics, f, indent=4)
-    print(f"Segmentation results saved to {results_path}")
-
-    # Optionally save the trained model
-    if args.save_model:
-        model_path = os.path.join(args.output_dir, f"{args.mode}_segmentation_model.pth")
-        torch.save(model.state_dict(), model_path)
-        print(f"Trained model saved to {model_path}")
-
+        json.dump(results, f, indent=4)
+    print(f"Results saved to {results_path}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Downstream Segmentation Evaluation")
-    parser.add_argument("--config-path", required=True, help="Path to the main evaluation config YAML.")
-    parser.add_argument("--metadata-path", required=True, help="Path to the downstream metadata CSV file.")
-    parser.add_argument("--output-dir", required=True, help="Directory to save evaluation results.")
-    parser.add_argument("--mode", required=True, choices=["baseline", "generated"], help="Evaluation mode.")
-    parser.add_argument("--generated-images-dir", help="Directory containing generated images (required if mode='generated'). Relative to base_dir.")
-    parser.add_argument("--base-dir", default=".", help="Project base directory for resolving relative paths.")
-    parser.add_argument("--save-model", action="store_true", help="Save the trained model.")
+    parser = argparse.ArgumentParser(description="Segmentation Training")
+    parser.add_argument("--config-path", required=True, help="Path to config YAML")
+    parser.add_argument("--metadata-path", required=True, help="Path to metadata CSV")
+    parser.add_argument("--output-dir", required=True, help="Output directory")
+    parser.add_argument("--mode", required=True, choices=["baseline", "generated"])
+    parser.add_argument("--generated-images-dir", help="Generated images directory")
+    parser.add_argument("--base-dir", default=".", help="Base directory")
+    parser.add_argument("--save-model", action="store_true", help="Save best model")
 
     args = parser.parse_args()
-
+    
     if args.mode == "generated" and not args.generated_images_dir:
-        parser.error("--generated-images-dir is required when mode='generated'")
+        parser.error("--generated-images-dir required for generated mode")
 
     main(args)
