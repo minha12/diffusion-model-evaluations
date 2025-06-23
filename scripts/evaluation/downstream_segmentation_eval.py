@@ -294,14 +294,19 @@ def train_epoch(model, dataloader, criterion, optimizer, device, scheduler=None)
     return epoch_loss
 
 def validate_epoch(model, dataloader, criterion, device, num_classes):
-    """Validation during training"""
+    """Validation during training - FIXED VERSION"""
     model.eval()
     running_loss = 0.0
     processed_samples = 0
     
     # Metrics
     accuracy_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, average='macro').to(device)
-    tp_sum = fp_sum = fn_sum = tn_sum = 0
+    
+    # Initialize metric accumulators as tensors with correct shape
+    tp_sum = torch.zeros(num_classes, device=device)
+    fp_sum = torch.zeros(num_classes, device=device)
+    fn_sum = torch.zeros(num_classes, device=device)
+    tn_sum = torch.zeros(num_classes, device=device)
 
     with torch.no_grad():
         for images, masks in tqdm(dataloader, desc="Validating", leave=False):
@@ -315,10 +320,18 @@ def validate_epoch(model, dataloader, criterion, device, num_classes):
             preds = torch.argmax(outputs, dim=1)
             accuracy_metric.update(preds, masks)
             
-            # IoU computation
+            # IoU computation - FIX: Sum across batch dimension
             tp, fp, fn, tn = smp.metrics.get_stats(
                 preds, masks, mode='multiclass', num_classes=num_classes
             )
+            
+            # Ensure tensors are on the same device and sum across batch dimension
+            tp = tp.to(device).sum(dim=0)  # Sum across batch dimension
+            fp = fp.to(device).sum(dim=0)  # Sum across batch dimension
+            fn = fn.to(device).sum(dim=0)  # Sum across batch dimension
+            tn = tn.to(device).sum(dim=0)  # Sum across batch dimension
+            
+            # Accumulate with proper tensor operations
             tp_sum += tp
             fp_sum += fp
             fn_sum += fn
@@ -338,13 +351,19 @@ def validate_epoch(model, dataloader, criterion, device, num_classes):
 
 # --- Enhanced Evaluation ---
 def evaluate(model, dataloader, criterion, device, num_classes):
+    """Enhanced evaluation - FIXED VERSION"""
     model.eval()
     running_loss = 0.0
     processed_samples = 0
 
     # Metrics
     accuracy_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes, average='macro').to(device)
-    tp_sum = fp_sum = fn_sum = tn_sum = 0
+    
+    # Initialize metric accumulators as tensors with correct shape
+    tp_sum = torch.zeros(num_classes, device=device)
+    fp_sum = torch.zeros(num_classes, device=device)
+    fn_sum = torch.zeros(num_classes, device=device)
+    tn_sum = torch.zeros(num_classes, device=device)
 
     with torch.no_grad():
         for images, masks in tqdm(dataloader, desc="Evaluating", leave=False):
@@ -358,9 +377,18 @@ def evaluate(model, dataloader, criterion, device, num_classes):
             preds = torch.argmax(outputs, dim=1)
             accuracy_metric.update(preds, masks)
             
+            # IoU computation - FIX: Sum across batch dimension
             tp, fp, fn, tn = smp.metrics.get_stats(
                 preds, masks, mode='multiclass', num_classes=num_classes
             )
+            
+            # Ensure tensors are on the same device and sum across batch dimension
+            tp = tp.to(device).sum(dim=0)  # Sum across batch dimension
+            fp = fp.to(device).sum(dim=0)  # Sum across batch dimension
+            fn = fn.to(device).sum(dim=0)  # Sum across batch dimension
+            tn = tn.to(device).sum(dim=0)  # Sum across batch dimension
+            
+            # Accumulate with proper tensor operations
             tp_sum += tp
             fp_sum += fp
             fn_sum += fn
@@ -579,11 +607,9 @@ def main(args):
         # Print progress
         current_lr = optimizer.param_groups[0]['lr']
         print(f"Epoch {epoch+1}/{seg_config['num_epochs']} - "
-              f"Train Loss: {train_loss:.4f} - "
-              f"Val Loss: {val_metrics['loss']:.4f} - "
-              f"Val mIoU: {val_metrics['miou']:.4f} - "
-              f"Val Acc: {val_metrics['accuracy']:.4f} - "
-              f"LR: {current_lr:.6f}")
+              f"Train Loss: {train_loss:.4f}, "
+              f"Val Loss: {val_metrics['loss']:.4f}, Val Acc: {val_metrics['accuracy']:.4f}, "
+              f"Val F1: {val_metrics['miou']:.4f}, LR: {current_lr:.2e}")
         
         # Save best model
         if val_metrics['miou'] > best_val_miou:
