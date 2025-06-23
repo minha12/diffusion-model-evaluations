@@ -1,8 +1,8 @@
 # config/metrics.yaml
 
 # Image parameters
-image_size: [256, 256]
-batch_size: 16 # FOR TESTING ONLY, CHANGE TO, E.G. 16 LATER
+image_size: [512, 512]
+batch_size: 4 # FOR TESTING ONLY, CHANGE TO, E.G. 16 LATER
 
 # Metrics to compute
 metrics:
@@ -17,8 +17,8 @@ metrics:
   # Peak Signal-to-Noise Ratio
   psnr: {}
 
-  # Structural Similarity Index Measure
-  ssim: {}
+  # # Structural Similarity Index Measure
+  # ssim: {}
 
   # Multi-Scale Structural Similarity Index Measure
   ms_ssim: {}

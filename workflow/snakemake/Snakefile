@@ -1,77 +1,112 @@
 # workflow/snakemake/Snakefile
-
 import os
 import yaml
 from pathlib import Path
-
 # Load configuration
-configfile: "config/evaluation.yaml"
-
+configfile: "config/evaluation_bcss.yaml"
 # Define dataset
 DATASET = config["dataset"]
-
-# Define directories with dataset paths
+# Define directories
+BASE_DIR = "." # Define project base directory
 MODELS_DIR = "models"
 RESULTS_DIR = f"results/{DATASET}"
-GROUND_TRUTH_DIR = f"data/{DATASET}/patches"
-GENERATED_IMAGES_DIR = f"{RESULTS_DIR}/generated_images"
-METRICS_DIR = f"{RESULTS_DIR}/metrics"
-
+DATA_DIR = f"data/{DATASET}"
+GROUND_TRUTH_DIR = f"{DATA_DIR}/patches"
+PLAIN_SEGMENTATION_DIR = f"{DATA_DIR}/plain-segmentation" # Use plain segmentation
+GENERATED_IMAGES_DIR_TPL = f"{RESULTS_DIR}/generated_images/{{model}}" # Template
+METRICS_DIR_TPL = f"{RESULTS_DIR}/metrics/{{model}}" # Template
+DOWNSTREAM_DATA_DIR = f"{RESULTS_DIR}/downstream_data" # Metadata storage
+DOWNSTREAM_RESULTS_DIR_TPL = f"{RESULTS_DIR}/downstream_eval/{{task}}/{{eval_mode}}/{{model}}" # Template for results
 # Get model names
-MODELS = config["models"]
-
-# Define rule to run all evaluations, including dataset preparation
+MODELS = list(config["models"].keys())
+SD_MODELS = [model for model in MODELS if config["models"][model].get("model_class", "sd") == "sd"]
+LDM_MODELS = [model for model in MODELS if config["models"][model].get("model_class", "sd") == "ldm"]
+# --- Target Rules ---
+# Define final outputs for the 'all' rule
+all_outputs = []
+all_outputs.append(f"data/{DATASET}")  # Dataset preparation dependency
+all_outputs.extend(expand(f"{METRICS_DIR_TPL}/metrics_results.yaml", model=MODELS))
+all_outputs.append(f"{RESULTS_DIR}/visualizations")
+# Add downstream task results if enabled
+if config.get("downstream_tasks", {}).get("enabled", False):
+    # Baseline results (model='baseline')
+    if config["downstream_tasks"].get("classification", {}).get("enabled", False):
+        all_outputs.append(f"{RESULTS_DIR}/downstream_eval/classification/baseline/baseline/classification_results.json")
+    if config["downstream_tasks"].get("segmentation", {}).get("enabled", False):
+        all_outputs.append(f"{RESULTS_DIR}/downstream_eval/segmentation/baseline/baseline/segmentation_results.json")
+    # Generated results per model
+    for model in MODELS:
+        if config["downstream_tasks"].get("classification", {}).get("enabled", False):
+             all_outputs.append(f"{RESULTS_DIR}/downstream_eval/classification/generated/{model}/classification_results.json")
+        if config["downstream_tasks"].get("segmentation", {}).get("enabled", False):
+             all_outputs.append(f"{RESULTS_DIR}/downstream_eval/segmentation/generated/{model}/segmentation_results.json")
+    # Add the downstream report marker
+    all_outputs.append(f"{RESULTS_DIR}/downstream_eval/.report_complete")
 rule all:
-    input:
-        f"data/{DATASET}",  # Add dataset preparation as a dependency
-        expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
-
-# Rule to prepare the dataset
+    input: all_outputs
+# --- Dataset Preparation ---
 rule prepare_dataset:
     output:
-        directory(f"data/{DATASET}")
+        main_dir=directory(DATA_DIR),
+        seg_dir=directory(f"{DATA_DIR}/segmentation"),
+        patches_dir=directory(f"{DATA_DIR}/patches"),
+        plain_seg_dir=directory(f"{DATA_DIR}/plain-segmentation"),
+        prompts=f"{DATA_DIR}/prompts/prompts.txt"
     params:
-        source_dir=config["data_sources"]["drsk"]["path"],
+        source_dir=config["data_sources"][DATASET]["path"],
         num_samples=config["dataset_preparation"]["num_samples"],
-        seed=config["dataset_preparation"]["seed"]
+        seed=config["dataset_preparation"]["seed"],
+        # Extract directory names using os.path.basename
+        segmentation_subdir=os.path.basename(f"{DATA_DIR}/segmentation"),
+        plain_segmentation_subdir=os.path.basename(PLAIN_SEGMENTATION_DIR)
+    conda: config["conda_envs"]["default"]
     shell:
         """
-        python scripts/preparation/sd35_controlnet.py \
-            --source_dir={params.source_dir} \
-            --target_dir={output} \
-            --num_samples={params.num_samples} \
-            --seed={params.seed}
+        python scripts/preparation/prepare_dataset.py \
+            --source_dir {params.source_dir} \
+            --target_dir {output.main_dir} \
+            --num_samples {params.num_samples} \
+            --seed {params.seed} \
+            --segmentation_subdir {params.segmentation_subdir} \
+            --plain_segmentation_subdir {params.plain_segmentation_subdir}
         """
-
-# New rule to run inference for all models (without wildcards)
+# --- Inference ---
+# Rule to run inference for all models (preserved from original)
 rule run_all_inference:
     input:
-        dataset=f"data/{DATASET}",  # Add dataset preparation as a dependency
-        models=expand(f"{GENERATED_IMAGES_DIR}/{{model}}", model=MODELS)
+        dataset=f"data/{DATASET}",  # Dataset preparation dependency
+        models=expand(GENERATED_IMAGES_DIR_TPL, model=MODELS)
     output:
         touch(f"{RESULTS_DIR}/.inference_complete")
-
-# Rule to run inference for each model
-rule run_inference:
+ruleorder: run_sd_inference > run_ldm_inference
+# Rule to clone and prepare the LDM repository
+rule prepare_ldm:
+     output: directory("models/latent-diffusion-semantic")
+     shell: "bash scripts/preparation/prepare_ldm.sh {output}"
+# SD inference rule
+rule run_sd_inference:
     input:
         accelerate_config=config["accelerate_config"],
-        control_images=f"data/{DATASET}/segmentation",  # Dataset-specific control images
-        model=lambda wildcards: f"{MODELS_DIR}/{wildcards.model}",
-        prompts=f"data/{DATASET}/prompts/prompts.txt",
-        dataset=f"data/{DATASET}"  # Add dataset preparation as a dependency
+        control_images=f"{DATA_DIR}/segmentation", # Original segmentation for ControlNet
+        prompts=f"{DATA_DIR}/prompts/prompts.txt",
+        dataset=rules.prepare_dataset.output.main_dir # Ensure dataset is prepared
     output:
-        directory(f"{GENERATED_IMAGES_DIR}/{{model}}")
+        directory(GENERATED_IMAGES_DIR_TPL)
+    wildcard_constraints: model="|".join(SD_MODELS)
     params:
         batch_size=config["inference"]["batch_size"],
-        steps=config["inference"]["num_inference_steps"],
+        steps=lambda wildcards: config["models"][wildcards.model].get("num_inference_steps", config["inference"]["num_inference_steps"]),
         resolution=config["inference"]["resolution"],
         base_model_path=lambda wildcards: config["models"][wildcards.model]["base_path"],
-        controlnet_path=lambda wildcards: config["models"][wildcards.model]["controlnet_path"],
+        model_type=lambda wildcards: config["models"][wildcards.model].get("model_type", "sd"),
+        controlnet_path=lambda wildcards: config["models"][wildcards.model].get("controlnet_path", ""),
         seed=config["inference"]["seed"]
+    conda: config["conda_envs"]["default"]
+    resources: gpus=4
     shell:
         """
         mkdir -p {output}
-        accelerate launch --config_file {input.accelerate_config} scripts/inference/inference.py \
+        accelerate launch --config_file {input.accelerate_config} scripts/inference/sd_inference.py \
             --condition_dir {input.control_images} \
             --prompts_file {input.prompts} \
             --output_dir {output} \
@@ -80,23 +115,54 @@ rule run_inference:
             --steps {params.steps} \
             --resolution {params.resolution} \
             --base_model_path {params.base_model_path} \
-            --controlnet_path {params.controlnet_path}
+            --controlnet_path {params.controlnet_path} \
+            --model_type {params.model_type}
         """
-
-# Add this rule to your Snakefile
+# LDM inference rule
+rule run_ldm_inference:
+    input:
+        control_images=f"{DATA_DIR}/plain-segmentation", # LDM uses plain segmentation
+        dataset=rules.prepare_dataset.output.main_dir,
+        ldm_repo=rules.prepare_ldm.output
+    output:
+        directory(GENERATED_IMAGES_DIR_TPL)
+    wildcard_constraints: model="|".join(LDM_MODELS)
+    params:
+        batch_size=config["inference"]["batch_size"],
+        config_path=lambda wildcards: config["models"][wildcards.model]["config_path"],
+        ckpt_path=lambda wildcards: config["models"][wildcards.model]["ckpt_path"],
+        seed=config["inference"]["seed"],
+        steps=lambda wildcards: config["models"][wildcards.model].get("num_inference_steps", config["inference"].get("ldm_steps", 200))
+    conda: config["conda_envs"]["ldm"]
+    resources: gpus=1
+    shell:
+        """
+        mkdir -p {output}
+        python scripts/inference/ldm_inference.py \
+            --control_images {input.control_images} \
+            --output_dir {output} \
+            --batch_size {params.batch_size} \
+            --seed {params.seed} \
+            --steps {params.steps} \
+            --config_path {params.config_path} \
+            --ckpt_path {params.ckpt_path}
+        """
+# --- Image Quality Metric Evaluation ---
+# Rule to evaluate all models (preserved from original)
 rule evaluate_all_models:
     input:
-        expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
-        
-# Rule to evaluate each model
+        expand(f"{METRICS_DIR_TPL}/metrics_results.yaml", model=MODELS)
+# Rule for individual model evaluation
 rule evaluate_model:
     input:
-        generated=f"{GENERATED_IMAGES_DIR}/{{model}}",
+        generated=GENERATED_IMAGES_DIR_TPL,
         ground_truth=GROUND_TRUTH_DIR,
         config="config/metrics.yaml"
     output:
-        directory=directory(f"{METRICS_DIR}/{{model}}"),
-        results=f"{METRICS_DIR}/{{model}}/metrics_results.yaml"
+        directory=directory(METRICS_DIR_TPL),
+        results=f"{METRICS_DIR_TPL}/metrics_results.yaml"
+    conda: config["conda_envs"]["default"]
+    resources: gpus=1 # FID/etc. can use GPU
     shell:
         """
         mkdir -p {output.directory}
@@ -106,16 +172,182 @@ rule evaluate_model:
             --ground-truth {input.ground_truth} \
             --output {output.directory}
         """
+def get_metrics_dir(wildcards):
+    return METRICS_DIR_TPL.replace('/{model}', '')
 
-# Rule to generate comparison report
+# --- Downstream Task Reporting ---
+def get_all_downstream_results(wildcards):
+    """Helper function to gather all expected downstream result files."""
+    outputs = []
+    # Define tasks and eval modes based on your config or expectations
+    tasks = []
+    if config.get("downstream_tasks", {}).get("classification", {}).get("enabled", False):
+        tasks.append("classification")
+    if config.get("downstream_tasks", {}).get("segmentation", {}).get("enabled", False):
+        tasks.append("segmentation")
+
+    eval_modes = ['baseline'] # Baseline is always present conceptually
+    if len(MODELS) > 0:       # Only add 'generated' if models exist
+         eval_modes.append('generated')
+
+    # Baseline results
+    for task in tasks:
+        outputs.append(f"{RESULTS_DIR}/downstream_eval/{task}/baseline/baseline/{task}_results.json")
+
+    # Generated results per model
+    for task in tasks:
+        for model in MODELS:
+             # Check if the specific task is enabled for generated data
+             if config.get("downstream_tasks", {}).get(task, {}).get("enabled", False):
+                 outputs.append(f"{RESULTS_DIR}/downstream_eval/{task}/generated/{model}/{task}_results.json")
+
+    # Filter out duplicates just in case
+    return list(set(outputs))
+
 rule generate_report:
     input:
-        metrics=expand(f"{METRICS_DIR}/{{model}}/metrics_results.yaml", model=MODELS)
+        metrics_dir=expand(f"{METRICS_DIR_TPL}/metrics_results.yaml", model=MODELS)
     output:
-        report=f"{RESULTS_DIR}/evaluation_report.html"
+        directory(f"{RESULTS_DIR}/visualizations")
+    conda: config["conda_envs"]["default"]
+    params:
+        metrics_dir = get_metrics_dir
     shell:
         """
+        mkdir -p {output}
         python scripts/evaluation/generate_report.py \
-            --metrics-dirs {input.metrics} \
-            --output {output.report}
+            --metrics-dir {params.metrics_dir} \
+            --output-dir {output}
         """
+    
+# --- Downstream Task Evaluation ---
+# Rule to prepare metadata for downstream tasks
+rule prepare_downstream_data:
+     input:
+         config="config/evaluation.yaml",
+         dataset_dir=rules.prepare_dataset.output.main_dir # Depends on dataset
+     output:
+         metadata=f"{DOWNSTREAM_DATA_DIR}/downstream_metadata.csv",
+         train_meta=f"{DOWNSTREAM_DATA_DIR}/train_metadata.csv",
+         test_meta=f"{DOWNSTREAM_DATA_DIR}/test_metadata.csv",
+         out_dir=directory(DOWNSTREAM_DATA_DIR)
+     params:
+         base_dir=BASE_DIR # Pass project base dir
+     conda: config["conda_envs"]["downstream"] # Use downstream env
+     shell:
+         """
+         python scripts/preparation/prepare_downstream_data.py \
+             --config {input.config} \
+             --dataset-dir {input.dataset_dir} \
+             --output-dir {output.out_dir} \
+             --base-dir {params.base_dir}
+         """
+# Rule for Downstream Classification Evaluation
+rule run_classification_eval:
+    input:
+        config="config/evaluation.yaml",
+        metadata=rules.prepare_downstream_data.output.metadata,
+        # Conditional input: generated images needed only for 'generated' mode
+        generated_images=lambda wildcards: GENERATED_IMAGES_DIR_TPL.format(model=wildcards.model) if wildcards.eval_mode == 'generated' else [],
+    output:
+        results=f"{RESULTS_DIR}/downstream_eval/classification/{{eval_mode}}/{{model}}/classification_results.json",
+        out_dir=directory(f"{RESULTS_DIR}/downstream_eval/classification/{{eval_mode}}/{{model}}")
+    params:
+        mode="{eval_mode}", # 'baseline' or 'generated'
+        gen_img_dir=lambda wildcards: GENERATED_IMAGES_DIR_TPL.format(model=wildcards.model) if wildcards.eval_mode == 'generated' else "",
+        model_name="{model}", # 'baseline' or actual model name
+        base_dir=BASE_DIR,
+        enabled=lambda wildcards: config.get("downstream_tasks", {}).get("classification", {}).get("enabled", False)
+    conda: config["conda_envs"]["downstream"]
+    resources: gpus=1 # Training needs GPU
+    shell:
+        """
+        if [ "{params.enabled}" = "True" ]; then
+            gen_dir_arg=""
+            if [ "{params.mode}" = "generated" ]; then
+                gen_dir_arg="--generated-images-dir {params.gen_img_dir}"
+            fi
+            
+            mkdir -p {output.out_dir}
+            
+            python scripts/evaluation/downstream_classification_eval.py \
+                --config-path {input.config} \
+                --metadata-path {input.metadata} \
+                --output-dir {output.out_dir} \
+                --mode {params.mode} \
+                $gen_dir_arg \
+                --base-dir {params.base_dir}
+        else
+            mkdir -p {output.out_dir}
+            touch {output.results}
+            echo "Skipping classification for {params.model_name} as it's disabled in config."
+        fi
+        """
+# Rule for Downstream Segmentation Evaluation
+rule run_segmentation_eval:
+    input:
+        config="config/evaluation.yaml",
+        metadata=rules.prepare_downstream_data.output.metadata,
+        generated_images=lambda wildcards: GENERATED_IMAGES_DIR_TPL.format(model=wildcards.model) if wildcards.eval_mode == 'generated' else [],
+    output:
+        results=f"{RESULTS_DIR}/downstream_eval/segmentation/{{eval_mode}}/{{model}}/segmentation_results.json",
+        out_dir=directory(f"{RESULTS_DIR}/downstream_eval/segmentation/{{eval_mode}}/{{model}}")
+    params:
+        mode="{eval_mode}",
+        gen_img_dir=lambda wildcards: GENERATED_IMAGES_DIR_TPL.format(model=wildcards.model) if wildcards.eval_mode == 'generated' else "",
+        model_name="{model}",
+        base_dir=BASE_DIR,
+        enabled=lambda wildcards: config.get("downstream_tasks", {}).get("segmentation", {}).get("enabled", False)
+    conda: config["conda_envs"]["downstream"]
+    resources: gpus=1
+    shell:
+        """
+        if [ "{params.enabled}" = "True" ]; then
+            gen_dir_arg=""
+            if [ "{params.mode}" = "generated" ]; then
+                gen_dir_arg="--generated-images-dir {params.gen_img_dir}"
+            fi
+            
+            mkdir -p {output.out_dir}
+            
+            python scripts/evaluation/downstream_segmentation_eval.py \
+                --config-path {input.config} \
+                --metadata-path {input.metadata} \
+                --output-dir {output.out_dir} \
+                --mode {params.mode} \
+                $gen_dir_arg \
+                --base-dir {params.base_dir}
+        else
+            mkdir -p {output.out_dir}
+            touch {output.results}
+            echo "Skipping segmentation for {params.model_name} as it's disabled in config."
+        fi
+        """
+# Rule for generating downstream task report
+rule generate_downstream_report:
+    input:
+        # Depend on all potential downstream result files
+        results=get_all_downstream_results
+    output:
+        # Create a marker file to indicate completion
+        marker=touch(f"{RESULTS_DIR}/downstream_eval/.report_complete")
+    params:
+        results_base_dir=RESULTS_DIR, # Pass the base results directory
+        output_dir=f"{RESULTS_DIR}/downstream_eval" # Directory where the script will create 'visualizations' subdir
+    conda: config["conda_envs"]["default"]
+    shell:
+        """
+        python scripts/evaluation/generate_downstream_report.py \
+            --results-dir {params.results_base_dir} \
+            --output-dir {params.output_dir}
+        """
+# --- Aggregation/Reporting for Downstream Tasks (Optional) ---
+# rule aggregate_downstream_results:
+#     input:
+#         # Collect all classification and segmentation JSON results
+#         # ...
+#     output:
+#         report = f"{RESULTS_DIR}/downstream_eval/summary_report.md" # Or other format
+#     conda: config["conda_envs"]["default"] # Or downstream env if pandas/etc needed
+#     script:
+#         "scripts/evaluation/generate_downstream_report.py" # You'd need to create this script

@@ -59,6 +59,11 @@ conda install -c bioconda snakemake
 huggingface-cli login
 ```
 
+- If port 29500 is being occupied:
+```bash
+sudo systemctl restart NetworkManager
+```
+
 3. Set up your directory structure (if not already created):
    ```bash
    bash create_structure.sh
@@ -86,22 +91,109 @@ The project uses Snakemake to manage the evaluation workflow. The main workflow 
 To run the complete workflow:
 
 ```bash
-cd workflow/snakemake
-snakemake --cores all
+snakemake --resources gpus=4 -s workflow/snakemake/Snakefile --use-conda --cores all
 ```
 
 To run specific steps:
 
 ```bash
 # Prepare dataset only
-snakemake --cores all prepare_dataset
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all prepare_dataset
 
 # Run inference only
-snakemake --cores all run_all_inference
+snakemake --resources gpus=4 -s workflow/snakemake/Snakefile --use-conda --cores all run_all_inference
 
 # Run evaluation only
-snakemake --cores all evaluate_all_models
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all evaluate_all_models
 ```
+
+### Using Custom Configuration Files
+
+To run the workflow with a specific configuration file:
+
+```bash
+snakemake --configfile config/evaluation_segpath.yaml --resources gpus=4 -s workflow/snakemake/Snakefile --use-conda --cores all evaluate_all_models
+```
+
+This allows you to maintain multiple configuration files for different evaluation settings without modifying the default configuration.
+
+### Running Inference for a Specific Model
+
+To run inference for only a specific model:
+
+```bash
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all "results/{DATASET}/generated_images/{MODEL_NAME}"
+```
+
+For example, to run only SD3.5 ControlNet on the test dataset:
+
+```bash
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all results/test/generated_images/sd35_controlnet
+```
+
+For incomplete runs, add the `--rerun-incomplete` flag:
+
+```bash
+snakemake -s workflow/snakemake/Snakefile --use-conda --cores all results/test/generated_images/sd35_controlnet --rerun-incomplete
+```
+
+## Workflow Graph
+
+The following graph visualizes the Snakemake workflow structure and dependencies between tasks:
+
+```mermaid
+graph TD
+    %% Define Nodes (Rules and Key Data)
+    subgraph Preparation
+        direction TB
+        PrepData[("prepare_dataset <br> (Generates dataset, patches, prompts, etc.)")]
+        PrepLDM[("prepare_ldm <br> (Clones LDM repo)")]
+    end
+
+    subgraph Inference
+        direction TB
+        RunSD["run_sd_inference <br> (Generates images for SD models)"]
+        RunLDM["run_ldm_inference <br> (Generates images for LDM models)"]
+    end
+
+    subgraph Evaluation
+        direction TB
+        EvalModel["evaluate_model <br> (Generates metrics per model)"]
+        GenReport[("generate_report <br> (Creates visualizations/report)")]
+    end
+
+    FinalTarget[("rule all <br> (Final target)")]
+
+    %% Define Edges (Dependencies)
+
+    %% Preparation Dependencies
+    %% (External config/scripts are implicit)
+
+    %% Inference Dependencies
+    PrepData -- "Dataset (segmentation, prompts)" --> RunSD
+    PrepData -- "Dataset (plain-segmentation)" --> RunLDM
+    PrepLDM -- "LDM Repo" --> RunLDM
+
+    %% Evaluation Dependencies
+    PrepData -- "Ground Truth Patches" --> EvalModel
+    RunSD -- "Generated SD Images" --> EvalModel
+    RunLDM -- "Generated LDM Images" --> EvalModel
+    EvalModel -- "Metrics Results (all models)" --> GenReport
+
+    %% Rule All Dependencies
+    PrepData -- "Dataset Prepared" --> FinalTarget
+    EvalModel -- "Metrics Results (all models)" --> FinalTarget
+    GenReport -- "Visualizations" --> FinalTarget
+
+    %% Style (Optional)
+    classDef rule fill:#f9f,stroke:#333,stroke-width:2px;
+    class PrepData,PrepLDM,RunSD,RunLDM,EvalModel,GenReport,FinalTarget rule;
+```
+
+The workflow consists of three main stages:
+1. **Preparation**: Sets up the dataset, generates prompts, and prepares any required repositories
+2. **Inference**: Runs image generation using different models (SD and LDM variants)
+3. **Evaluation**: Calculates metrics and generates reports comparing model performance
 
 ## Metrics
 

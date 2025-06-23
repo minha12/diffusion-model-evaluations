@@ -15,12 +15,9 @@ def create_directory_structure(target_dir):
     """Create the directory structure for the test dataset"""
     dirs = [
         "patches",
-        "processed/pathology/annotations",
-        "processed/pathology/masks",
-        "processed/pathology/metadata",
-        "processed/pathology/patches",
         "prompts",
-        "segmentation"
+        "segmentation",
+        "plain-segmentation"  # Added new directory
     ]
     
     for dir_path in dirs:
@@ -62,6 +59,7 @@ def copy_dataset(
     seed=42,
     images_subdir="images",
     segmentation_subdir="segmentation",
+    plain_segmentation_subdir="plain-segmentation",  # Added new parameter
     prompt_file="prompt.json",
     verbose=False
 ):
@@ -75,6 +73,7 @@ def copy_dataset(
         seed: Random seed for reproducibility
         images_subdir: Subdirectory name containing images (default: "images")
         segmentation_subdir: Subdirectory name containing segmentation masks (default: "segmentation")
+        plain_segmentation_subdir: Subdirectory name containing plain segmentation masks (default: "plain-segmentation")
         prompt_file: Name of the prompt file (default: "prompt.json")
         verbose: Whether to print detailed information (default: False)
     """
@@ -92,6 +91,7 @@ def copy_dataset(
     # Get list of image files
     images_dir = os.path.join(source_dir, images_subdir)
     segmentation_dir = os.path.join(source_dir, segmentation_subdir)
+    plain_segmentation_dir = os.path.join(source_dir, plain_segmentation_subdir)  # Added new directory reference
     
     # List all images and get their IDs
     all_image_files = os.listdir(images_dir)
@@ -120,7 +120,8 @@ def copy_dataset(
                 src_image = os.path.join(images_dir, f"{image_id}.png")
             
             # Use original filename instead of sequential numbering
-            target_image = os.path.join(target_dir, "patches", f"{image_id}{os.path.splitext(src_image)[1]}")
+            image_filename = f"{image_id}{os.path.splitext(src_image)[1]}"
+            target_image = os.path.join(target_dir, "patches", image_filename)
             
             if os.path.exists(src_image):
                 shutil.copy2(src_image, target_image)
@@ -132,8 +133,6 @@ def copy_dataset(
             
             # Copy segmentation mask
             src_seg = os.path.join(segmentation_dir, f"{image_id}.png")
-            
-            # Use original filename for segmentation as well
             target_seg = os.path.join(target_dir, "segmentation", f"{image_id}.png")
             
             if os.path.exists(src_seg):
@@ -143,6 +142,18 @@ def copy_dataset(
             else:
                 if verbose:
                     print(f"Warning: Source segmentation not found: {src_seg}")
+            
+            # After copying segmentation, add code to copy plain-segmentation
+            src_plain_seg = os.path.join(plain_segmentation_dir, f"{image_id}.png")
+            target_plain_seg = os.path.join(target_dir, "plain-segmentation", f"{image_id}.png")
+            
+            if os.path.exists(src_plain_seg):
+                shutil.copy2(src_plain_seg, target_plain_seg)
+                if verbose:
+                    print(f"Copied plain segmentation: {src_plain_seg} -> {target_plain_seg}")
+            else:
+                if verbose:
+                    print(f"Warning: Source plain segmentation not found: {src_plain_seg}")
             
             # Write prompt to file
             prompt_text = match_prompt_to_image(prompts, image_id)

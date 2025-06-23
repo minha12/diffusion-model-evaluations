@@ -1,0 +1,46 @@
+models:
+  sd35_controlnet:
+    base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
+    controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5"
+    model_type: "sd3"  # Specific model architecture
+    model_class: "sd"  # Indicates which inference pipeline to use
+    num_inference_steps: 28  # SD3-specific inference steps
+  sd21_controlnet:
+    base_path: "stabilityai/stable-diffusion-2-1-base"  # Can be HF ID or local path
+    controlnet_path: "/home/ubuntu/models/trained-diffusion/sd21_controlnet/controlnet"
+    model_type: "sd2"  # Specific model architecture
+    model_class: "sd"  # Indicates which inference pipeline to use
+    num_inference_steps: 50  # SD2-specific inference steps
+  ldm_model_512:
+    model_type: "ldm"  # Specific model architecture
+    model_class: "ldm"  # Indicates which inference pipeline to use
+    config_path: "/home/ubuntu/models/trained-diffusion/ldm/config-512-with-vq-f4.yaml"
+    ckpt_path: "/home/ubuntu/models/trained-diffusion/ldm/epoch=000099.ckpt"
+    num_inference_steps: 200  # LDM-specific inference steps
+
+inference:
+  batch_size: 4
+  num_inference_steps: 28 # Global default (fallback if not specified in model)
+  resolution: 512
+  seed: 42
+
+# Dataset information
+dataset_name: &dataset_name "test"  # Using an anchor
+dataset: *dataset_name  # Using the alias to reference the anchor
+
+# Data source information
+data_sources:
+  *dataset_name:
+    path: "~/datasets/drsk"
+
+# Dataset preparation parameters
+dataset_preparation:
+  num_samples: 4
+  seed: 42
+
+# Accelerate config
+accelerate_config: "config/accelerate_config.yaml"
+
+conda_envs:
+  default: "envs/default.yaml"
+  ldm: "envs/ldm.yaml"
