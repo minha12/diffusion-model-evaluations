@@ -1,0 +1,13 @@
+fid: 9.228211402893066
+is_mean: 1.0
+is_std: 0.0
+kid_mean: 0.006083629094064236
+kid_std: 0.13249705731868744
+lpips_mean: 0.5121269822120667
+lpips_std: 0.0
+ms_ssim_mean: 0.07362066954374313
+ms_ssim_std: 0.0
+psnr_mean: 10.91019344329834
+psnr_std: 0.0
+uiqi_mean: 0.00028381188167259097
+uiqi_std: 0.0
