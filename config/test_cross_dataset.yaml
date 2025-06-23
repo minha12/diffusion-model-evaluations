@@ -1,0 +1,88 @@
+# config/evaluation.yaml
+
+# Define dataset keys as anchors
+dataset_keys:
+  drsk: &drsk_key "drsk-4-seed-23"
+  bcss: &bcss_key "bcss-4-seed-23"
+  segpath: &segpath_key "segpath-4-seed-23"
+
+# Define datasets - single source of truth
+datasets:
+  *drsk_key:
+    path: "~/datasets/drsk"
+    num_samples: 4
+    seed: 23
+  *bcss_key:
+    path: "~/datasets/bcss/data/5-classes/val"
+    num_samples: 4
+    seed: 23
+  *segpath_key:
+    path: "~/datasets/segpath/data/val"
+    num_samples: 4
+    seed: 23
+
+# Define models with dataset key references
+models:
+  sd35_controlnet_bcss:
+    base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
+    controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5-bcss"
+    model_type: "sd3"
+    model_class: "sd"
+    num_inference_steps: 28
+    dataset_key: *bcss_key  # Reference using anchor
+    
+  sd35_controlnet:
+    base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
+    controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5"
+    model_type: "sd3"
+    model_class: "sd"
+    num_inference_steps: 28
+    dataset_key: *drsk_key  # Reference using anchor
+    
+  sd35_controlnet_segpath:
+    base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
+    controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5-segpath"
+    model_type: "sd3"
+    model_class: "sd"
+    num_inference_steps: 50
+    dataset_key: *segpath_key  # Reference using anchor
+
+# Rest of config remains the same...
+inference:
+  batch_size: 4
+  num_inference_steps: 28
+  resolution: 512
+  seed: 23
+
+dataset_preparation:
+  num_samples: 1000
+  seed: 23
+
+accelerate_config: "config/accelerate_config.yaml"
+
+downstream_tasks:
+  enabled: true
+  classification:
+    enabled: true
+    model: "resnet18"
+    num_epochs: 20
+    batch_size: 16
+    learning_rate: 0.001
+    labeling_strategy: "multiclass_dominant"
+    carcinoma_threshold: 0.1
+    num_classes: 3
+    class_names: ["Inflammatory/Reactive", "Carcinoma", "Normal"]
+  segmentation:
+    enabled: true
+    model: "deeplabv3plus"
+    encoder: "se_resnext101_32x4d"
+    num_epochs: 30
+    batch_size: 16
+    learning_rate: 0.0005
+    num_classes: 5
+    class_names: ["Unknown", "Background/Artifact", "Inflammatory/Reactive", "Carcinoma", "Normal"]
+
+conda_envs:
+  default: "envs/default.yaml"
+  ldm: "envs/ldm.yaml"
+  downstream: "envs/downstream.yaml"
