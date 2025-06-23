@@ -1,3 +1,4 @@
+# workflow/snakemake/Snakefile
 import os
 import yaml
 from pathlib import Path
@@ -119,7 +120,7 @@ rule run_sd_inference:
 # LDM inference rule
 rule run_ldm_inference:
     input:
-        control_images=PLAIN_SEGMENTATION_DIR, # LDM uses plain segmentation
+        control_images=f"{DATA_DIR}/plain-segmentation", # LDM uses plain segmentation
         dataset=rules.prepare_dataset.output.main_dir,
         ldm_repo=rules.prepare_ldm.output
     output:
