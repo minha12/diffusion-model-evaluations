@@ -3,7 +3,7 @@ import os
 import yaml
 from pathlib import Path
 # Load configuration
-configfile: "config/evaluation.yaml"
+configfile: "config/evaluation_bcss.yaml"
 # Define dataset
 DATASET = config["dataset"]
 # Define directories
@@ -12,7 +12,7 @@ MODELS_DIR = "models"
 RESULTS_DIR = f"results/{DATASET}"
 DATA_DIR = f"data/{DATASET}"
 GROUND_TRUTH_DIR = f"{DATA_DIR}/patches"
-PLAIN_SEGMENTATION_DIR = f"{DATA_DIR}/plain-segmentation-clean-5-cls" # Use plain segmentation
+PLAIN_SEGMENTATION_DIR = f"{DATA_DIR}/plain-segmentation" # Use plain segmentation
 GENERATED_IMAGES_DIR_TPL = f"{RESULTS_DIR}/generated_images/{{model}}" # Template
 METRICS_DIR_TPL = f"{RESULTS_DIR}/metrics/{{model}}" # Template
 DOWNSTREAM_DATA_DIR = f"{RESULTS_DIR}/downstream_data" # Metadata storage
@@ -78,6 +78,7 @@ rule run_all_inference:
         models=expand(GENERATED_IMAGES_DIR_TPL, model=MODELS)
     output:
         touch(f"{RESULTS_DIR}/.inference_complete")
+ruleorder: run_sd_inference > run_ldm_inference
 # Rule to clone and prepare the LDM repository
 rule prepare_ldm:
      output: directory("models/latent-diffusion-semantic")
