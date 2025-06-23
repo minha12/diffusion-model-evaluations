@@ -107,6 +107,16 @@ snakemake --resources gpus=4 -s workflow/snakemake/Snakefile --use-conda --cores
 snakemake -s workflow/snakemake/Snakefile --use-conda --cores all evaluate_all_models
 ```
 
+### Using Custom Configuration Files
+
+To run the workflow with a specific configuration file:
+
+```bash
+snakemake --configfile config/evaluation_segpath.yaml --resources gpus=4 -s workflow/snakemake/Snakefile --use-conda --cores all evaluate_all_models
+```
+
+This allows you to maintain multiple configuration files for different evaluation settings without modifying the default configuration.
+
 ### Running Inference for a Specific Model
 
 To run inference for only a specific model:
