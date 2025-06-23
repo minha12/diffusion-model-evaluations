@@ -3,107 +3,91 @@ models:
   sd35_controlnet:
     base_path: "/home/ubuntu/models/stabilityai/stable-diffusion-3-medium-diffusers"
     controlnet_path: "/home/ubuntu/models/trained-diffusion/controlnet-sd3.5"
-    model_type: "sd3"
-    model_class: "sd"
-    num_inference_steps: 28
+    model_type: "sd3"  # Specific model architecture
+    model_class: "sd"  # Indicates which inference pipeline to use
+    num_inference_steps: 28  # SD3-specific inference steps
   sd21_controlnet:
-    base_path: "stabilityai/stable-diffusion-2-1-base"
+    base_path: "stabilityai/stable-diffusion-2-1-base"  # Can be HF ID or local path
     controlnet_path: "/home/ubuntu/models/trained-diffusion/sd21_controlnet/controlnet"
-    model_type: "sd2"
-    model_class: "sd"
-    num_inference_steps: 50
+    model_type: "sd2"  # Specific model architecture
+    model_class: "sd"  # Indicates which inference pipeline to use
+    num_inference_steps: 50  # SD2-specific inference steps
   ldm_model_512:
-    model_type: "ldm"
-    model_class: "ldm"
+    model_type: "ldm"  # Specific model architecture
+    model_class: "ldm"  # Indicates which inference pipeline to use
     config_path: "/home/ubuntu/models/trained-diffusion/ldm/config-512-with-vq-f4.yaml"
     ckpt_path: "/home/ubuntu/models/trained-diffusion/ldm/ldm-seg-512-000074.ckpt"
-    num_inference_steps: 200
+    num_inference_steps: 200  # LDM-specific inference steps
 
 inference:
   batch_size: 4
-  num_inference_steps: 28
+  num_inference_steps: 28 # Global default (fallback if not specified in model)
   resolution: 512
   seed: 23
 
-# Multi-dataset configuration
+# NEW: Multiple dataset configuration
 datasets:
-  drsk:
-    name: "drsk-1k-seed-23"
+  drsk-1k-seed-23:
     path: "~/datasets/drsk"
     num_samples: 1000
     seed: 23
-    # Dataset-specific downstream task settings
-    downstream_tasks:
-      classification:
-        num_classes: 3
-        class_names: ["Inflammatory/Reactive", "Carcinoma", "Normal"]
-        labeling_strategy: "multiclass_dominant"
-      segmentation:
-        num_classes: 5
-        class_names: ["Unknown", "Background/Artifact", "Inflammatory/Reactive", "Carcinoma", "Normal"]
-  
-  bcss:
-    name: "bcss-1k-seed-23"
+  bcss-1k-seed-23:
     path: "~/datasets/bcss"
     num_samples: 1000
     seed: 23
-    downstream_tasks:
-      classification:
-        num_classes: 4
-        class_names: ["Invasive", "In-situ", "Benign", "Normal"]
-        labeling_strategy: "multiclass_dominant"
-      segmentation:
-        num_classes: 5
-        class_names: ["Outside ROI", "Invasive", "In-situ", "Benign", "Normal"]
-
-  segpath:
-    name: "segpath-1k-seed-23"
+  segpath-1k-seed-23:
     path: "~/datasets/segpath"
     num_samples: 1000
     seed: 23
-    downstream_tasks:
-      classification:
-        num_classes: 2
-        class_names: ["Benign", "Malignant"]
-        labeling_strategy: "binary_carcinoma"
-        carcinoma_threshold: 0.1
-      segmentation:
-        num_classes: 3
-        class_names: ["Background", "Benign", "Malignant"]
 
-# Global dataset preparation parameters (can be overridden per dataset)
+# Global dataset preparation parameters (used as defaults)
 dataset_preparation:
   num_samples: 1000
   seed: 23
 
-# Target datasets to process (comment/uncomment as needed)
-target_datasets:
-  - drsk
-  - bcss
-  - segpath
-
 # Accelerate config
 accelerate_config: "config/accelerate_config.yaml"
 
-# Global downstream task settings (can be overridden per dataset)
+# --- Downstream Task Evaluation Settings ---
 downstream_tasks:
-  enabled: true
+  enabled: true # Set to false to skip downstream tasks
   classification:
     enabled: true
-    model: "resnet18"
+    model: "resnet18" # Model architecture from torchvision.models
     num_epochs: 20
     batch_size: 16
     learning_rate: 0.001
+    # How to derive labels from masks:
+    # 'binary_carcinoma': Label 1 if carcinoma > threshold, else 0
+    # 'multiclass_dominant': Label is the most frequent class (excluding Unknown/Background)
+    labeling_strategy: "multiclass_dominant"
+    carcinoma_threshold: 0.1 # Minimum fraction of carcinoma pixels for binary label 1
+    num_classes: 3 # Adjust based on labeling_strategy (2 for binary, 3+ for multiclass)
+    class_names: ["Inflammatory/Reactive", "Carcinoma", "Normal"] # Corresponds to binary_carcinoma strategy
+    # You might need to adjust num_classes and class_names if using multiclass
+    # class_names_multiclass: ["Inflammatory/Reactive", "Carcinoma", "Normal"] # Example for multiclass
   segmentation:
     enabled: true
-    model: "deeplabv3plus"
-    encoder: "se_resnext101_32x4d"
+    model: "deeplabv3plus" # Changed from 'unet' to 'fpn'
+    encoder: "se_resnext101_32x4d" # Changed from 'resnet34' to 'resnext50_32x4d'
     num_epochs: 30
     batch_size: 16
     learning_rate: 0.0005
+    num_classes: 5 # Corresponds to your mask labels 0-4
+    class_names: ["Unknown", "Background/Artifact", "Inflammatory/Reactive", "Carcinoma", "Normal"]
 
-# Conda environments
+# --- Conda Environments ---
 conda_envs:
-  default: "envs/default.yaml"
+  default: "envs/default.yaml" # Assumes env with torch, torchvision, torchmetrics, pyyaml, etc.
   ldm: "envs/ldm.yaml"
-  downstream: "envs/downstream.yaml"
+  downstream: "envs/downstream.yaml" # New environment for downstream tasks
+
+# LEGACY SUPPORT: Keep old format for backward compatibility
+# If using the old single-dataset format, uncomment and modify these:
+# dataset_name: &dataset_name "drsk-1k-seed-23"
+# dataset: *dataset_name  # Using the alias to reference the anchor
+# 
+# # Data source information (legacy format)
+# data_sources:
+#   *dataset_name:
+#     path: "~/datasets/drsk"
