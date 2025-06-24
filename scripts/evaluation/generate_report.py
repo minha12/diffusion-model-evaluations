@@ -7,20 +7,47 @@ import seaborn as sns
 from pathlib import Path
 from matplotlib.gridspec import GridSpec
 
-def load_metrics(metrics_dir):
-    """Load metrics from all model subdirectories."""
+def load_metrics(metrics_dirs):
+    """Load metrics from model subdirectories across multiple metrics directories."""
     metrics_data = {}
     
-    # Find all metrics_results.yaml files
-    metrics_dir = Path(metrics_dir)
-    for model_dir in metrics_dir.glob('*/'):
-        model_name = model_dir.name
-        metrics_file = model_dir / 'metrics_results.yaml'
+    # Handle both single directory (backward compatibility) and multiple directories
+    if isinstance(metrics_dirs, str):
+        metrics_dirs = [metrics_dirs]
+    
+    # Determine if we're in single or multiple directory mode
+    is_single_dir = len(metrics_dirs) == 1
+    
+    for metrics_dir in metrics_dirs:
+        metrics_dir = Path(metrics_dir)
         
-        if metrics_file.exists():
-            with open(metrics_file, 'r') as f:
-                metrics = yaml.safe_load(f)
-                metrics_data[model_name] = metrics
+        # Find all metrics_results.yaml files
+        for model_dir in metrics_dir.glob('*/'):
+            model_name = model_dir.name
+            metrics_file = model_dir / 'metrics_results.yaml'
+            
+            if metrics_file.exists():
+                with open(metrics_file, 'r') as f:
+                    metrics = yaml.safe_load(f)
+                
+                # For single directory mode, use original naming (backward compatibility)
+                if is_single_dir:
+                    unique_model_name = model_name
+                else:
+                    # For multiple directory mode, extract parent folder name
+                    dataset_identifier = metrics_dir.parent.name
+                    unique_model_name = f"{model_name}_{dataset_identifier}"
+                
+                # Handle naming conflicts by adding suffix
+                base_name = unique_model_name
+                counter = 1
+                while unique_model_name in metrics_data:
+                    unique_model_name = f"{base_name}_{counter}"
+                    counter += 1
+                
+                metrics_data[unique_model_name] = metrics
+                
+                print(f"Loaded metrics for {unique_model_name} from {metrics_file}")
     
     return metrics_data
 
@@ -270,9 +297,10 @@ def create_radar_chart(metrics_data, output_dir, normalization_method='comparati
         
         ax.set_title(method_title, size=14, pad=20)
     
-    # Add a single legend for all subplots
+    # Add a single legend for all subplots - adjust positioning for more models
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='center', bbox_to_anchor=(0.5, 0.02), ncol=len(metrics_data), fontsize=12)
+    ncol = min(len(metrics_data), 4)  # Limit columns to prevent overflow
+    fig.legend(handles, labels, loc='center', bbox_to_anchor=(0.5, 0.02), ncol=ncol, fontsize=10)
     
     plt.suptitle('Model Comparison with Normalization Methods', fontsize=20, y=0.95)
     plt.tight_layout(rect=[0, 0.08, 1, 0.92])
@@ -359,8 +387,11 @@ def create_single_radar_chart(metrics_data, output_dir, normalization_method='co
     # Add grid
     ax.grid(True, alpha=0.3)
     
-    # Add legend
-    plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1), fontsize=11)
+    # Add legend - adjust for many models
+    if len(metrics_data) <= 6:
+        plt.legend(loc='upper right', bbox_to_anchor=(0.1, 0.1), fontsize=11)
+    else:
+        plt.legend(loc='center left', bbox_to_anchor=(1.1, 0.5), fontsize=9)
     
     method_names = {
         'comparative': 'Comparative Normalization',
@@ -415,7 +446,7 @@ def create_summary_grid(metrics_data, output_dir):
         # Create the bar chart
         ax.bar(models, values, yerr=errors, capsize=5)
         ax.set_title(f'{metric.upper()}', fontsize=14)
-        ax.set_xticklabels(models, rotation=45, ha='right')
+        ax.set_xticklabels(models, rotation=45, ha='right', fontsize=8)
         ax.tick_params(axis='x', labelsize=8)
     
     # Add an radar chart in the last position
@@ -463,8 +494,9 @@ def create_summary_grid(metrics_data, output_dir):
     ax.set_ylim(0.2, 1.0)
     ax.grid(True, alpha=0.3)
     
-    # Add legend
-    plt.figlegend(loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=len(metrics_data))
+    # Add legend with adjusted positioning
+    ncol = min(len(metrics_data), 3)
+    plt.figlegend(loc='lower center', bbox_to_anchor=(0.5, 0.01), ncol=ncol, fontsize=9)
     
     plt.suptitle('Model Performance Summary (Normalization)', fontsize=20)
     plt.tight_layout(rect=[0, 0.05, 1, 0.95])
@@ -475,7 +507,12 @@ def create_summary_grid(metrics_data, output_dir):
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize model evaluation metrics with normalization")
-    parser.add_argument("--metrics-dir", type=str, required=True, help="Directory containing model metrics")
+    
+    # Support both single directory (backward compatibility) and multiple directories
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--metrics-dir", type=str, help="Single directory containing model metrics (backward compatibility)")
+    group.add_argument("--metrics-dirs", type=str, nargs='+', help="Multiple directories containing model metrics")
+    
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to save visualizations")
     parser.add_argument("--normalization", type=str, default='comparative', 
                         choices=['comparative', 'performance_scaled', 'centered', 'theoretical', 'adaptive'],
@@ -483,17 +520,30 @@ def main():
     
     args = parser.parse_args()
     
+    # Determine which argument was used
+    if args.metrics_dir:
+        metrics_dirs = [args.metrics_dir]
+        print(f"Using single metrics directory: {args.metrics_dir}")
+    else:
+        metrics_dirs = args.metrics_dirs
+        print(f"Using multiple metrics directories: {metrics_dirs}")
+    
     # Load metrics data
-    metrics_data = load_metrics(args.metrics_dir)
+    metrics_data = load_metrics(metrics_dirs)
     
     if not metrics_data:
         print("No metrics data found!")
         return
     
+    print(f"\nLoaded metrics for {len(metrics_data)} models:")
+    for model_name in metrics_data.keys():
+        print(f"  - {model_name}")
+    
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Generate visualizations
+    print(f"\nGenerating visualizations...")
     create_bar_charts(metrics_data, args.output_dir)
     create_radar_chart(metrics_data, args.output_dir, args.normalization)
     create_summary_grid(metrics_data, args.output_dir)
