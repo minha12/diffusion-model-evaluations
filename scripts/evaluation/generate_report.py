@@ -7,7 +7,7 @@ import seaborn as sns
 from pathlib import Path
 from matplotlib.gridspec import GridSpec
 
-def load_metrics(metrics_dirs):
+def load_metrics(metrics_dirs, selected_models=None):
     """Load metrics from model subdirectories across multiple metrics directories."""
     metrics_data = {}
     
@@ -24,6 +24,11 @@ def load_metrics(metrics_dirs):
         # Find all metrics_results.yaml files
         for model_dir in metrics_dir.glob('*/'):
             model_name = model_dir.name
+            
+            # Skip models not in selected_models list if filtering is enabled
+            if selected_models and model_name not in selected_models:
+                continue
+                
             metrics_file = model_dir / 'metrics_results.yaml'
             
             if metrics_file.exists():
@@ -34,7 +39,7 @@ def load_metrics(metrics_dirs):
                 if is_single_dir:
                     unique_model_name = model_name
                 else:
-                    # For multiple directory mode, extract parent folder name
+                    # For multiple directory mode, extract parent folder name for dataset identifier
                     dataset_identifier = metrics_dir.parent.name
                     unique_model_name = f"{model_name}_{dataset_identifier}"
                 
@@ -517,6 +522,8 @@ def main():
     parser.add_argument("--normalization", type=str, default='comparative', 
                         choices=['comparative', 'performance_scaled', 'centered', 'theoretical', 'adaptive'],
                         help="Normalization method for radar charts")
+    parser.add_argument("--select-models", type=str, nargs='*', default=None,
+                        help="Select specific model names to include in comparison (default: include all models)")
     
     args = parser.parse_args()
     
@@ -529,7 +536,7 @@ def main():
         print(f"Using multiple metrics directories: {metrics_dirs}")
     
     # Load metrics data
-    metrics_data = load_metrics(metrics_dirs)
+    metrics_data = load_metrics(metrics_dirs, selected_models=args.select_models)
     
     if not metrics_data:
         print("No metrics data found!")
