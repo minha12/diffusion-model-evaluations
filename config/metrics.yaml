@@ -25,7 +25,7 @@ metrics:
 
   # Kernel Inception Distance
   kid:
-    subset_size: 50 # FOR TESTING ONLY, CHANGE TO, E.G. 50 LATER
+    subset_size: 1000 # FOR TESTING ONLY, CHANGE TO, E.G. 50 LATER
 
   # Inception Score
   is: {}
