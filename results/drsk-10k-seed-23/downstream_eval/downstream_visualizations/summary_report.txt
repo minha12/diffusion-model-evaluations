@@ -1,0 +1,61 @@
+Downstream Task Evaluation Summary
+========================================
+
+SEGMENTATION TASK
+--------------------
+Baseline Results:
+  loss: 0.5295
+  mean_iou: 0.5632
+  pixel_accuracy: 0.6876
+
+sd21_controlnet Results:
+  loss: 0.9281
+  mean_iou: 0.2859
+  pixel_accuracy: 0.3625
+
+sd35_controlnet Results:
+  loss: 1.0887
+  mean_iou: 0.2943
+  pixel_accuracy: 0.3947
+
+ldm_model_512 Results:
+  loss: 0.8044
+  mean_iou: 0.3768
+  pixel_accuracy: 0.5633
+
+
+CLASSIFICATION TASK
+--------------------
+Baseline Results:
+  loss: 0.8489
+  accuracy: 0.8230
+  precision: 0.7525
+  recall: 0.7185
+  f1_score: 0.7317
+  auc: 0.8990
+
+sd21_controlnet Results:
+  loss: 1.1132
+  accuracy: 0.4355
+  precision: 0.4160
+  recall: 0.4541
+  f1_score: 0.3677
+  auc: 0.6359
+
+sd35_controlnet Results:
+  loss: 1.5844
+  accuracy: 0.6525
+  precision: 0.4570
+  recall: 0.4719
+  f1_score: 0.4612
+  auc: 0.6713
+
+ldm_model_512 Results:
+  loss: 1.0134
+  accuracy: 0.6775
+  precision: 0.5794
+  recall: 0.6873
+  f1_score: 0.6052
+  auc: 0.8422
+
+

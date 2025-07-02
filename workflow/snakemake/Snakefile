@@ -3,7 +3,7 @@ import os
 import yaml
 from pathlib import Path
 # Load configuration
-configfile: "config/evaluation_bcss.yaml"
+configfile: "config/evaluation.yaml"
 # Define dataset
 DATASET = config["dataset"]
 # Define directories
